@@ -84,9 +84,11 @@ public class ChatRoomDAO {
                 } // participantPstmt 자동 닫힘
 
                 conn.commit(); // 모든 작업 성공 시 커밋
-                newRoom = new ChatRoom(roomId, roomName, LocalDateTime.now(), isGroupChat);
+                newRoom = new ChatRoom(roomId, roomName, LocalDateTime.now(), isGroupChat); // 생성 시간은 DB에서 가져오는 것이 더 정확
 
                 // 생성된 방의 참여자 목록 로드 (개별 DAO 호출)
+                // 이 부분은 getParticipantsInRoom(roomId)로 대체될 수 있습니다.
+                // 다만 ChatRoom 객체에 참여자 정보를 바로 설정하기 위해 유지합니다.
                 UserDAO userDAO = new UserDAO();
                 List<User> participants = new ArrayList<>();
                 for (int userId : participantIds) {

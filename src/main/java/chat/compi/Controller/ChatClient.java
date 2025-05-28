@@ -16,8 +16,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.BlockingQueue; // <-- 이 줄이 있어야 합니다.
+import java.util.concurrent.LinkedBlockingQueue; // <-- 이 줄이 있어야 합니다.
 import java.util.function.Consumer;
 
 public class ChatClient {
@@ -27,9 +27,8 @@ public class ChatClient {
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
-    private User currentUser; // 현재 로그인한 사용자 정보
+    private User currentUser;
 
-    // 서버로부터 받은 응답을 처리할 리스너들을 저장하는 맵
     private final Map<ServerResponse.ResponseType, Consumer<ServerResponse>> responseListeners = new HashMap<>();
 
     // 메시지 큐 (비동기 처리를 위해)
@@ -63,7 +62,7 @@ public class ChatClient {
             out.flush();
         } catch (IOException e) {
             System.err.println("Error sending request to server: " + e.getMessage());
-            // TODO: 서버 연결 끊김 처리
+            disconnect(); // 연결 끊김 처리 추가
         }
     }
 
@@ -72,12 +71,11 @@ public class ChatClient {
         try {
             while (socket.isConnected()) {
                 ServerResponse response = (ServerResponse) in.readObject();
-                responseQueue.put(response); // 큐에 응답 추가
-                // System.out.println("Received response: " + response.getType());
+                responseQueue.put(response); // 'put' 메서드 사용
+                System.out.println("Received response: " + response.getType());
             }
         } catch (IOException | ClassNotFoundException | InterruptedException e) {
             System.err.println("Error receiving response from server: " + e.getMessage());
-            // 서버 연결 끊김 처리 (예: GUI에 알림 띄우고 종료)
             disconnect();
         }
     }
@@ -86,7 +84,7 @@ public class ChatClient {
     public void processResponses() {
         while (true) {
             try {
-                ServerResponse response = responseQueue.take(); // 큐에서 응답 대기
+                ServerResponse response = responseQueue.take(); // 'take' 메서드 사용
                 Consumer<ServerResponse> listener = responseListeners.get(response.getType());
                 if (listener != null) {
                     listener.accept(response);
@@ -104,6 +102,11 @@ public class ChatClient {
     // 응답 리스너 등록
     public void setResponseListener(ServerResponse.ResponseType type, Consumer<ServerResponse> listener) {
         responseListeners.put(type, listener);
+    }
+
+    // 새로운 메서드 추가: 특정 ResponseType에 등록된 리스너를 가져오는 메서드
+    public Consumer<ServerResponse> getResponseListener(ServerResponse.ResponseType type) {
+        return responseListeners.get(type);
     }
 
     // 현재 로그인 사용자 설정

@@ -32,7 +32,6 @@ public class MessageDAO {
                 ResultSet rs = pstmt.getGeneratedKeys();
                 if (rs.next()) {
                     message.setMessageId(rs.getInt(1)); // 생성된 메시지 ID 설정
-                    message.setSentAt(LocalDateTime.now()); // DB 저장 시간으로 설정
                     return message;
                 }
             }
@@ -170,8 +169,9 @@ public class MessageDAO {
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
                 "WHERE m.message_id = ?";
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, messageId);
+            ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
                 int rId = rs.getInt("room_id");
                 int senderId = rs.getInt("sender_id");
@@ -186,5 +186,27 @@ public class MessageDAO {
             System.err.println("Error getting message by ID: " + e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * 특정 메시지를 특정 사용자가 읽었는지 여부 확인
+     * @param messageId 메시지 ID
+     * @param userId 사용자 ID
+     * @return 읽었으면 true, 아니면 false
+     */
+    public boolean isMessageReadByUser(int messageId, int userId) {
+        String sql = "SELECT COUNT(*) FROM message_reads WHERE message_id = ? AND user_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, messageId);
+            pstmt.setInt(2, userId);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            System.err.println("Error checking if message is read by user: " + e.getMessage());
+        }
+        return false;
     }
 }

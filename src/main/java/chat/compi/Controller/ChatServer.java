@@ -151,13 +151,30 @@ public class ChatServer {
             ClientHandler handler = connectedClients.get(participant.getUserId());
             if (handler != null) {
                 Map<String, Object> data = new HashMap<>();
+                // 클라이언트에게 메시지를 보낼 때, unreadCount를 설정하여 보냅니다.
+                // ChatServer가 메시지를 브로드캐스트하기 전에 unreadCount를 계산하여 Message 객체에 설정.
+                // 다만, 이 unreadCount는 해당 메시지를 이 참가자가 '지금까지' 읽지 않았음을 나타내지,
+                // 총 몇 명이 안 읽었는지는 메시지 전송 시점이 아니라 조회 시점에 계산하는 것이 정확합니다.
+                // 따라서 NEW_MESSAGE로 보내지는 메시지에는 unreadCount를 0으로 보내고,
+                // ROOM_MESSAGES_UPDATE 시에 정확한 unreadCount를 계산하여 보냅니다.
+                // 여기서는 NEW_MESSAGE 시점에 발신자를 제외한 총 참여자 수를 기준으로 미열람 수를 임시로 설정
+                int totalParticipantsInRoom = chatRoomDAO.getParticipantsInRoom(message.getRoomId()).size();
+                int unreadCountForNewMessage = totalParticipantsInRoom - 1; // 보낸 사람 제외
+                if (participant.getUserId() == senderUserId) {
+                    savedMessage.setUnreadCount(0); // 보낸 사람은 바로 읽은 것으로 간주
+                } else {
+                    savedMessage.setUnreadCount(unreadCountForNewMessage);
+                }
                 data.put("message", savedMessage);
                 data.put("senderId", senderUserId); // 메시지를 보낸 사용자 ID 추가
                 handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NEW_MESSAGE, true, "New message", data));
             }
         }
 
-        // 읽지 않은 사용자 수 업데이트
+        // 읽지 않은 사용자 수 업데이트 (ROOM_MESSAGES_UPDATE를 통해 각 클라이언트에 갱신)
+        // 이 부분은 주기적인 스케줄러나 특정 이벤트(예: 메시지 읽음 처리)에 의해 일괄 업데이트하는 것이 적절합니다.
+        // 현재는 새로운 메시지 전송 후 즉시 모든 참여자에게 ROOM_MESSAGES_UPDATE를 보내는 것은 비효율적일 수 있습니다.
+        // 하지만 메시지 읽음 처리가 반영된 메시지 리스트를 받기 위해 호출합니다.
         updateUnreadCountsForRoom(message.getRoomId());
     }
 
@@ -170,9 +187,10 @@ public class ChatServer {
         for (User participant : participants) {
             ClientHandler handler = connectedClients.get(participant.getUserId());
             if (handler != null) {
-                Map<String, Object> data = new HashMap<>();
-                data.put("chatRoom", updatedRoom);
-                handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, true, "Chat room updated", data));
+                // 해당 사용자에게만 이 방의 정보가 업데이트되었음을 알립니다.
+                // ChatClientGUI의 handleChatRoomsUpdate가 List<ChatRoom>을 받으므로,
+                // 전체 채팅방 목록을 다시 보내는 것이 더 자연스럽습니다.
+                handler.sendChatRoomList(); // 변경된 채팅방 목록을 다시 전송
             }
         }
     }
@@ -187,16 +205,14 @@ public class ChatServer {
 
         // 모든 채팅방을 대상으로 하는 것이 더 효율적일 수 있습니다.
         // 일단 모든 active chat rooms를 가져온다고 가정합니다.
-        List<ChatRoom> allRooms = chatRoomDAO.getChatRoomsByUserId(-1); // 임시로 -1: 모든 채팅방 가져오는 DAO 함수가 필요
-        if (allRooms == null) { // 임시로 모든 채팅방을 가져오는 헬퍼 함수
-            allRooms = getAllChatRoomsForUnreadCheck();
-        }
+        List<ChatRoom> allRooms = getAllChatRoomsForUnreadCheck();
+
 
         LocalDateTime oneHourAgo = LocalDateTime.now().minus(1, ChronoUnit.HOURS);
 
         for (ChatRoom room : allRooms) {
             List<User> participants = chatRoomDAO.getParticipantsInRoom(room.getRoomId());
-            List<Message> messagesInRoom = messageDAO.getMessagesInRoom(room.getRoomId());
+            List<Message> messagesInRoom = messageDAO.getMessagesInRoom(room.getRoomId()); // 해당 방의 모든 메시지
 
             for (Message message : messagesInRoom) {
                 if (message.getSentAt().isBefore(oneHourAgo)) { // 1시간 지난 메시지
@@ -207,7 +223,7 @@ public class ChatServer {
                         }
 
                         // 해당 메시지를 해당 유저가 읽었는지 확인
-                        boolean isRead = isMessageReadByUser(message.getMessageId(), participant.getUserId());
+                        boolean isRead = messageDAO.isMessageReadByUser(message.getMessageId(), participant.getUserId());
 
                         if (!isRead) {
                             // 아직 읽지 않았다면 알림 전송
@@ -217,24 +233,6 @@ public class ChatServer {
                 }
             }
         }
-    }
-
-    // 메시지 읽음 여부 확인 헬퍼
-    private boolean isMessageReadByUser(int messageId, int userId) {
-        // message_reads 테이블에서 확인
-        String sql = "SELECT COUNT(*) FROM message_reads WHERE message_id = ? AND user_id = ?";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, messageId);
-            pstmt.setInt(2, userId);
-            ResultSet rs = pstmt.executeQuery();
-            if (rs.next()) {
-                return rs.getInt(1) > 0;
-            }
-        } catch (SQLException e) {
-            System.err.println("Error checking message read status: " + e.getMessage());
-        }
-        return false;
     }
 
     // 안 읽은 메시지 알림 전송 (시스템 채팅방으로)
@@ -255,15 +253,18 @@ public class ChatServer {
     }
 
     // 방의 안 읽은 메시지 수 업데이트 (클라이언트 UI 표시용)
+    // 이 메서드는 ROOM_MESSAGES_UPDATE를 통해 각 클라이언트에 해당 방의 메시지 목록을 다시 보내고,
+    // 클라이언트는 이 목록을 기반으로 UI를 갱신합니다.
     public void updateUnreadCountsForRoom(int roomId) {
         List<User> participants = chatRoomDAO.getParticipantsInRoom(roomId);
-        List<Message> messagesInRoom = messageDAO.getMessagesInRoom(roomId); // 최신 메시지들을 가져옴
 
         for (User participant : participants) {
             ClientHandler handler = connectedClients.get(participant.getUserId());
             if (handler != null) {
-                Map<String, Object> roomMessagesData = new HashMap<>();
                 List<Message> messagesWithUnread = new ArrayList<>();
+                // 현재 해당 참가자가 읽지 않은 메시지를 포함하여 모든 메시지 가져오기
+                List<Message> messagesInRoom = messageDAO.getMessagesInRoom(roomId); // 이전에 구현된 getMessagesInRoom 사용
+
                 for (Message msg : messagesInRoom) {
                     // 각 메시지별로 읽은 사람 수 계산
                     int readCount = messageDAO.getReadCountForMessage(msg.getMessageId());
@@ -272,6 +273,7 @@ public class ChatServer {
                     messagesWithUnread.add(msg);
                 }
 
+                Map<String, Object> roomMessagesData = new HashMap<>();
                 roomMessagesData.put("roomId", roomId);
                 roomMessagesData.put("messages", messagesWithUnread);
                 // 이 응답을 클라이언트에게 보낼 때, 클라이언트는 이 데이터로 UI를 갱신
@@ -297,6 +299,8 @@ public class ChatServer {
                 LocalDateTime createdAt = rs.getTimestamp("created_at").toLocalDateTime();
                 boolean isGroupChat = rs.getBoolean("is_group_chat");
                 ChatRoom room = new ChatRoom(roomId, roomName, createdAt, isGroupChat);
+                // 모든 참여자 정보를 로드할 필요는 없지만, 일관성을 위해 포함
+                room.setParticipants(chatRoomDAO.getParticipantsInRoom(roomId));
                 allRooms.add(room);
             }
         } catch (SQLException e) {

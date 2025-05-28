@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @SuppressWarnings("unchecked")
@@ -42,8 +43,10 @@ public class ChatClientGUI extends JFrame {
     // 열려 있는 채팅방 다이얼로그를 관리하는 맵 (roomId -> ChatRoomDialog)
     private Map<Integer, ChatRoomDialog> openChatRoomDialogs;
 
-    // 별도 창들 (설정 메뉴에서 제거되었으나, 인스턴스는 유지하거나 완전히 제거할 수 있음)
-    // 여기서는 필요에 따라 유지하되, 설정 메뉴에서만 호출하지 않도록 합니다.
+    // 친구 더블클릭으로 1:1 채팅방을 열 때, 어떤 친구와의 방을 열어야 하는지 임시로 저장
+    private int pendingPrivateChatUserId = -1; //
+
+    // 별도 창들
     private JFrame noticeFrame;
     private JTextArea noticeArea;
     private JFrame timelineFrame;
@@ -90,7 +93,6 @@ public class ChatClientGUI extends JFrame {
         chatClient.getFriendList();
         chatClient.getChatRooms();
 
-        // 별도 창 초기화 (설정 메뉴에서 직접 호출하지 않으므로 여기서 초기화)
         initNoticeFrame();
         initTimelineFrame();
         initUnreadNotificationFrame();
@@ -110,6 +112,8 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.FILE_DOWNLOAD_SUCCESS, this::handleFileDownloadSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, this::handleSystemNotification);
         chatClient.setResponseListener(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, this::handleRoomMessagesUpdate);
+        // CREATE_CHAT_ROOM 요청에 대한 성공 응답 처리 리스너 추가
+        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleChatRoomCreationSuccess); //
     }
 
     private void initComponents() {
@@ -134,7 +138,7 @@ public class ChatClientGUI extends JFrame {
         friendListModel = new DefaultListModel<>();
         friendList = new JList<>(friendListModel);
         friendList.setCellRenderer(new FriendListCellRenderer());
-        friendList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION); // 1:1 대화방 생성을 위해 단일 선택으로 변경 (더블클릭 시)
+        friendList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         friendPanel.add(new JScrollPane(friendList), BorderLayout.CENTER);
 
         addFriendButton = new JButton("친구 추가");
@@ -142,18 +146,18 @@ public class ChatClientGUI extends JFrame {
         friendPanel.add(addFriendButton, BorderLayout.SOUTH);
         centerPanel.add(friendPanel);
 
-        // 친구 목록 더블클릭 이벤트 추가 (1:1 대화방 생성)
+        // 친구 목록 더블클릭 이벤트 추가 (1:1 대화방 생성 및 열기)
         friendList.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent evt) {
-                if (evt.getClickCount() == 2) { // 더블클릭 감지
+                if (evt.getClickCount() == 2) {
                     User selectedUser = friendList.getSelectedValue();
                     if (selectedUser != null) {
-                        // 선택된 친구와 1:1 대화방 생성 또는 열기 요청
+                        // 친구 더블클릭 시, 열고자 하는 1:1 채팅 상대방의 ID를 저장
+                        pendingPrivateChatUserId = selectedUser.getUserId(); //
                         List<Integer> participants = new ArrayList<>();
                         participants.add(currentUser.getUserId());
                         participants.add(selectedUser.getUserId());
-                        // isGroupChat=false 로 보내서 1:1 채팅방임을 서버에 알림
                         chatClient.createChatRoom("", false, participants);
                     }
                 }
@@ -200,12 +204,13 @@ public class ChatClientGUI extends JFrame {
                 @Override
                 public void windowClosed(WindowEvent e) {
                     openChatRoomDialogs.remove(room.getRoomId());
+                    chatRoomList.clearSelection();
                 }
             });
         }
         dialog.setVisible(true);
         dialog.toFront();
-        dialog.loadMessages(); // 메시지 로드 (새로 열거나 다시 볼 때)
+        dialog.loadMessages();
     }
 
 
@@ -215,7 +220,7 @@ public class ChatClientGUI extends JFrame {
         SwingUtilities.invokeLater(() -> {
             List<User> friends = (List<User>) response.getData().get("friends");
             friendListModel.clear();
-            if (friends != null) { // NullPointerException 방어
+            if (friends != null) {
                 for (User friend : friends) {
                     friendListModel.addElement(friend);
                 }
@@ -239,24 +244,85 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
+    private void handleChatRoomCreationSuccess(ServerResponse response) { //
+        // CREATE_CHAT_ROOM 요청에 대한 SUCCESS 응답 처리
+        // 이 응답에는 새로 생성되거나 찾아진 ChatRoom 객체가 포함되어 있어야 함
+        if (response.isSuccess() && response.getData() != null && response.getData().containsKey("chatRoom")) { //
+            ChatRoom createdOrFoundRoom = (ChatRoom) response.getData().get("chatRoom"); //
+            System.out.println("Chat room operation successful: " + createdOrFoundRoom.getRoomName() + ", Room ID: " + createdOrFoundRoom.getRoomId()); //
+
+            // 친구 더블클릭으로 1:1 채팅방이 생성/선택되었을 경우
+            if (pendingPrivateChatUserId != -1 && !createdOrFoundRoom.isGroupChat()) { //
+                // 생성되거나 찾아진 1:1 채팅방의 참여자 중 상대방의 ID가 일치하는지 확인
+                boolean foundTargetFriend = createdOrFoundRoom.getParticipants().stream() //
+                        .anyMatch(p -> p.getUserId() == pendingPrivateChatUserId && p.getUserId() != currentUser.getUserId()); //
+
+                if (foundTargetFriend) { //
+                    SwingUtilities.invokeLater(() -> { //
+                        System.out.println("Attempting to open chat room for pending user: " + pendingPrivateChatUserId); //
+                        openChatRoomDialog(createdOrFoundRoom); //
+                        // 채팅방 목록에서 해당 방을 선택 상태로 만듦
+                        for (int i = 0; i < chatRoomListModel.size(); i++) { //
+                            if (chatRoomListModel.getElementAt(i).getRoomId() == createdOrFoundRoom.getRoomId()) { //
+                                chatRoomList.setSelectedIndex(i); //
+                                chatRoomList.ensureIndexIsVisible(i); //
+                                break; //
+                            }
+                        }
+                    }); //
+                }
+                pendingPrivateChatUserId = -1; // 처리 후 초기화
+            }
+            // 일반적인 CHAT_ROOMS_UPDATE는 handleChatRoomsUpdate에서 처리되므로,
+            // 여기서는 친구 더블클릭으로 인한 특정 1:1 채팅방 열기만 담당합니다.
+            // 서버에서 CHAT_ROOMS_UPDATE를 항상 보내주므로, 목록 갱신 및 다른 다이얼로그 닫기는 그곳에서 처리됩니다.
+        } else if (!response.isSuccess() && "Failed to create chat room".equals(response.getMessage())) { //
+            // 채팅방 생성 실패 시 사용자에게 알림
+            SwingUtilities.invokeLater(() -> { //
+                JOptionPane.showMessageDialog(this, "채팅방 생성/열기 실패: " + response.getMessage(), "오류", JOptionPane.ERROR_MESSAGE); //
+            }); //
+            pendingPrivateChatUserId = -1; // 실패 시에도 초기화
+        }
+    }
+
+
     private void handleChatRoomsUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
-            List<ChatRoom> chatRooms = (List<ChatRoom>) response.getData().get("chatRooms");
+            List<ChatRoom> updatedChatRooms = (List<ChatRoom>) response.getData().get("chatRooms");
 
-            if (chatRooms == null) {
-                // 이 메시지는 이제 ChatRoomDAO에서 빈 리스트를 반환하므로 거의 나오지 않을 것입니다.
-                System.err.println("Received null chatRooms list from server. (This should not happen if DAO returns empty list)");
-                chatRooms = new ArrayList<>(); // null 방지
+            if (updatedChatRooms == null) {
+                System.err.println("Received null chatRooms list from server. Returning empty list.");
+                updatedChatRooms = new ArrayList<>();
             }
 
-            // 기존 목록을 비우고 새로 채웁니다.
-            // 서버에서 항상 해당 유저의 '전체' 채팅방 목록을 보내준다는 전제하에 올바른 방식입니다.
+            // 1. 현재 열려있는 채팅방 다이얼로그 중 업데이트된 목록에 없는 것은 닫기
+            List<Integer> currentRoomIdsInModel = updatedChatRooms.stream()
+                    .map(ChatRoom::getRoomId)
+                    .collect(Collectors.toList());
+            List<Integer> dialogsToClose = new ArrayList<>();
+            for (Integer roomId : openChatRoomDialogs.keySet()) {
+                if (!currentRoomIdsInModel.contains(roomId)) {
+                    dialogsToClose.add(roomId);
+                }
+            }
+            for (Integer roomId : dialogsToClose) {
+                ChatRoomDialog dialog = openChatRoomDialogs.remove(roomId);
+                if (dialog != null) {
+                    dialog.dispose();
+                    System.out.println("Closed chat room dialog for room ID: " + roomId + " as it's no longer in the updated list.");
+                }
+            }
+
+            // 2. 채팅방 목록 모델 업데이트
+            // 새로운 ChatRoom 객체로 갱신하여 participant 정보 등이 최신이 되도록 함
             chatRoomListModel.clear();
-            for (ChatRoom room : chatRooms) {
+            for (ChatRoom room : updatedChatRooms) {
                 chatRoomListModel.addElement(room);
             }
-            // 기존 선택 유지 (필요하다면)
-            if (currentChatRoom != null) {
+
+            // 3. (옵션) 이전에 선택되었던 방이 있다면 다시 선택
+            // (친구 더블클릭 시 자동 열기는 handleChatRoomCreationSuccess에서 처리)
+            if (currentChatRoom != null && openChatRoomDialogs.containsKey(currentChatRoom.getRoomId())) { // 열려있는 다이얼로그에 해당하는 경우
                 int index = -1;
                 for (int i = 0; i < chatRoomListModel.size(); i++) {
                     if (chatRoomListModel.getElementAt(i).getRoomId() == currentChatRoom.getRoomId()) {
@@ -279,16 +345,14 @@ public class ChatClientGUI extends JFrame {
 
             ChatRoomDialog dialog = openChatRoomDialogs.get(newMessage.getRoomId());
             if (dialog != null) {
+                System.out.println("Appending new message to existing dialog for room: " + newMessage.getRoomId());
                 dialog.appendMessageToChatArea(newMessage);
                 if (senderId != currentUser.getUserId()) {
                     chatClient.markMessageAsRead(newMessage.getMessageId());
                 }
             } else {
-                // 다이얼로그가 열려 있지 않으면, 채팅방 목록에서 새로운 메시지 알림 등을 표시
-                // TODO: 채팅방 목록 옆에 읽지 않은 메시지 수 표시 등의 UI 업데이트 로직 추가
-                System.out.println("New message in room " + newMessage.getRoomId() + ": " + newMessage.getContent());
-                // 필요하다면 해당 채팅방을 자동으로 열 수도 있음
-                // openChatRoomDialog(chatClient.getChatRooms().stream().filter(r -> r.getRoomId() == newMessage.getRoomId()).findFirst().orElse(null));
+                System.out.println("New message received for room " + newMessage.getRoomId() + ", dialog not open. Content: " + newMessage.getContent());
+                chatClient.getChatRooms();
             }
         });
     }
@@ -299,6 +363,7 @@ public class ChatClientGUI extends JFrame {
             ChatRoomDialog dialog = openChatRoomDialogs.get(roomId);
             if (dialog != null) {
                 List<Message> messages = (List<Message>) response.getData().get("messages");
+                System.out.println("Updating messages in dialog for room: " + roomId + ", message count: " + (messages != null ? messages.size() : 0));
                 dialog.displayMessages(messages);
             }
         });
@@ -327,7 +392,7 @@ public class ChatClientGUI extends JFrame {
     }
 
     private void handleFileUploadSuccess(ServerResponse response) {
-        // 이 메시지는 서버에서 NEW_MESSAGE로 브로드캐스트되므로, 여기서는 별도의 GUI 업데이트 불필요.
+        // This is fine, as NEW_MESSAGE broadcasts it.
     }
 
     private void handleFileDownloadSuccess(ServerResponse response) {
@@ -360,7 +425,6 @@ public class ChatClientGUI extends JFrame {
     }
 
     // --- 별도 창 기능 (Notice, Timeline, Unread) ---
-    // 설정 메뉴에서 직접 접근하지 않지만, 인스턴스는 유지합니다.
     private void initNoticeFrame() {
         noticeFrame = new JFrame("공지 사항");
         noticeFrame.setSize(400, 500);
@@ -507,25 +571,24 @@ public class ChatClientGUI extends JFrame {
         allUsersList.setCellRenderer(new ChatClientGUI.FriendListCellRenderer());
         allUsersList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
-        // TODO: 서버에 GET_ALL_USERS 요청이 필요합니다. 현재는 친구 목록을 가져와 사용합니다.
-        // 이것은 GET_FRIEND_LIST 응답을 가로채므로 주의해야 합니다.
-        // 이상적으로는 서버에 getAllUsers API를 추가하고 ClientRequest.RequestType.GET_ALL_USERS를 사용해야 합니다.
-        chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.GET_FRIEND_LIST, null));
+        Consumer<ServerResponse> originalFriendListUpdateListener = chatClient.getResponseListener(ServerResponse.ResponseType.FRIEND_LIST_UPDATE);
         chatClient.setResponseListener(ServerResponse.ResponseType.FRIEND_LIST_UPDATE, res -> {
             SwingUtilities.invokeLater(() -> {
                 List<User> friends = (List<User>) res.getData().get("friends");
                 allUsersModel.clear();
-                if (friends != null) { // NullPointerException 방어
+                if (friends != null) {
                     friends.stream()
                             .filter(user -> user.getUserId() != currentUser.getUserId())
                             .forEach(allUsersModel::addElement);
                 }
             });
+            chatClient.setResponseListener(ServerResponse.ResponseType.FRIEND_LIST_UPDATE, originalFriendListUpdateListener);
         });
+        chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.GET_FRIEND_LIST, null));
 
 
         JScrollPane userScrollPane = new JScrollPane(allUsersList);
-        userScrollPane.setBorder(new TitledBorder("초대할 친구 선택 (Ctrl/Shift 클릭)"));
+        userScrollPane.setBorder(new TitledBorder("초대할 친구 선택 (Ctrl/Shift/Shift 클릭)"));
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton createButton = new JButton("생성");
@@ -537,7 +600,7 @@ public class ChatClientGUI extends JFrame {
             List<Integer> invitedUserIds = selectedUsers.stream()
                     .map(User::getUserId)
                     .collect(Collectors.toList());
-            invitedUserIds.add(currentUser.getUserId()); // 본인도 참여자에 포함
+            invitedUserIds.add(currentUser.getUserId());
 
             boolean isGroupChat;
             String finalRoomName = roomNameField.getText().trim();
@@ -545,12 +608,10 @@ public class ChatClientGUI extends JFrame {
             if (selectedUsers.isEmpty()) {
                 JOptionPane.showMessageDialog(createRoomDialog, "채팅방에 초대할 친구를 선택해주세요.", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 return;
-            } else if (selectedUsers.size() == 1) { // 본인 포함 총 2명 => 그룹 채팅방으로 간주
-                isGroupChat = true;
-                if (finalRoomName.isEmpty()) {
-                    finalRoomName = selectedUsers.get(0).getNickname() + "님과의 채팅";
-                }
-            } else { // 본인 포함 3명 이상 => 그룹 채팅방
+            } else if (selectedUsers.size() == 1) {
+                isGroupChat = false;
+                finalRoomName = "";
+            } else {
                 if (finalRoomName.isEmpty()) {
                     JOptionPane.showMessageDialog(createRoomDialog, "그룹 채팅방 이름을 입력해주세요.", "입력 오류", JOptionPane.WARNING_MESSAGE);
                     return;
@@ -596,7 +657,6 @@ public class ChatClientGUI extends JFrame {
     }
 
 
-    // FriendListCellRenderer를 public static으로 변경
     public static class FriendListCellRenderer extends JLabel implements ListCellRenderer<User> {
         @Override
         public Component getListCellRendererComponent(JList<? extends User> list, User user, int index, boolean isSelected, boolean cellHasFocus) {
@@ -644,7 +704,6 @@ public class ChatClientGUI extends JFrame {
         }
     }
 
-    // ChatRoomDialog에서 메인 GUI의 친구 목록 모델에 접근하기 위한 getter
     public DefaultListModel<User> getFriendListModel() {
         return friendListModel;
     }

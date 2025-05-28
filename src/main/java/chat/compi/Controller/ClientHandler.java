@@ -26,7 +26,7 @@ public class ClientHandler implements Runnable {
     private ChatServer server;
     private ObjectInputStream in;
     private ObjectOutputStream out;
-    private int userId = -1; // 현재 핸들러에 연결된 사용자 ID
+    private int userId = -1;
 
     private UserDAO userDAO;
     private MessageDAO messageDAO;
@@ -41,7 +41,6 @@ public class ClientHandler implements Runnable {
         this.chatRoomDAO = new ChatRoomDAO();
         this.timelineDAO = new TimelineDAO();
         try {
-            // 출력 스트림을 먼저 생성해야 데드락 방지
             out = new ObjectOutputStream(clientSocket.getOutputStream());
             in = new ObjectInputStream(clientSocket.getInputStream());
         } catch (IOException e) {
@@ -63,7 +62,7 @@ public class ClientHandler implements Runnable {
             System.err.println("Client " + (userId != -1 ? userId : "unknown") + " handler error: " + e.getMessage());
         } finally {
             if (userId != -1) {
-                server.removeClient(userId); // 서버에서 클라이언트 제거 및 상태 업데이트
+                server.removeClient(userId);
             }
             closeConnection();
         }
@@ -79,16 +78,17 @@ public class ClientHandler implements Runnable {
                 String password = (String) request.getData().get("password");
                 User loggedInUser = userDAO.loginUser(username, password);
                 if (loggedInUser != null) {
-                    this.userId = loggedInUser.getUserId(); // 사용자 ID 저장
-                    server.addClient(userId, this); // 서버에 클라이언트 등록
+                    this.userId = loggedInUser.getUserId();
+                    server.addClient(userId, this);
                     responseData.put("user", loggedInUser);
                     response = new ServerResponse(ServerResponse.ResponseType.LOGIN_SUCCESS, true, "Login successful", responseData);
-                    sendFriendList();
-                    sendChatRoomList(); // 로그인 성공 시 채팅방 목록 전송
+                    sendResponse(response); // 로그인 성공 응답 먼저 보내기
+                    sendFriendList(); // 친구 목록
+                    sendChatRoomList(); // 채팅방 목록
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Invalid username or password", null);
+                    sendResponse(response);
                 }
-                sendResponse(response);
                 break;
 
             case REGISTER:
@@ -104,12 +104,12 @@ public class ClientHandler implements Runnable {
                 break;
 
             case LOGOUT:
-                server.removeClient(this.userId); // 서버에서 클라이언트 제거
-                userDAO.updateUserStatus(this.userId, UserStatus.OFFLINE); // DB 상태 업데이트
-                this.userId = -1; // 사용자 ID 초기화
+                server.removeClient(this.userId);
+                userDAO.updateUserStatus(this.userId, UserStatus.OFFLINE);
+                this.userId = -1;
                 response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Logout successful", null);
                 sendResponse(response);
-                closeConnection(); // 로그아웃 후 연결 종료
+                closeConnection();
                 break;
 
             case GET_FRIEND_LIST:
@@ -122,9 +122,9 @@ public class ClientHandler implements Runnable {
                 if (friendToAdd != null) {
                     if (userDAO.addFriend(this.userId, friendToAdd.getUserId())) {
                         response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Friend added successfully", null);
-                        sendFriendList(); // 본인 친구 목록 업데이트
-                        server.notifyFriendStatusChange(userDAO.getUserByUserId(this.userId)); // 본인 상태 변화 알림 (친구에게)
-                        server.notifyFriendStatusChange(friendToAdd); // 친구 상태 변화 알림 (본인에게)
+                        sendFriendList();
+                        server.notifyFriendStatusChange(userDAO.getUserByUserId(this.userId));
+                        server.notifyFriendStatusChange(friendToAdd);
                     } else {
                         response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to add friend (already friends or database error)", null);
                     }
@@ -145,7 +145,7 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                ChatRoom newRoom = null;
+                ChatRoom createdOrFoundRoom = null; //
 
                 if (!isGroupChatRequest) { // 1:1 대화
                     if (invitedUserIds.size() != 2) {
@@ -154,10 +154,10 @@ public class ClientHandler implements Runnable {
                         break;
                     }
                     List<Integer> sortedUserIds = invitedUserIds.stream().sorted().collect(Collectors.toList());
-                    newRoom = chatRoomDAO.getExistingPrivateChatRoom(sortedUserIds.get(0), sortedUserIds.get(1));
+                    createdOrFoundRoom = chatRoomDAO.getExistingPrivateChatRoom(sortedUserIds.get(0), sortedUserIds.get(1)); //
 
-                    if (newRoom == null) {
-                        newRoom = chatRoomDAO.createChatRoom("", false, this.userId, invitedUserIds);
+                    if (createdOrFoundRoom == null) { //
+                        createdOrFoundRoom = chatRoomDAO.createChatRoom("", false, this.userId, invitedUserIds); //
                     }
                 } else { // 그룹 채팅
                     if (roomName == null || roomName.trim().isEmpty()) {
@@ -165,26 +165,24 @@ public class ClientHandler implements Runnable {
                         sendResponse(response);
                         break;
                     }
-                    newRoom = chatRoomDAO.createChatRoom(roomName, true, this.userId, invitedUserIds);
+                    createdOrFoundRoom = chatRoomDAO.createChatRoom(roomName, true, this.userId, invitedUserIds); //
                 }
 
-                if (newRoom != null) {
-                    responseData.put("chatRoom", newRoom);
-                    response = new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, true, "Chat room created", responseData);
-                    sendResponse(response); // 요청한 클라이언트에게 먼저 응답
+                if (createdOrFoundRoom != null) { //
+                    responseData.put("chatRoom", createdOrFoundRoom); //
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Chat room created", responseData); //
+                    sendResponse(response); // 요청한 클라이언트에게 먼저 응답 (createdOrFoundRoom 포함)
 
-                    // 새로 생성/로딩된 방에 참여한 모든 사용자에게 채팅방 목록 업데이트 알림
-                    // getParticipantsInRoom을 통해 최신 참여자 목록을 다시 가져오는 것이 안전합니다.
-                    List<User> currentParticipantsOfNewRoom = chatRoomDAO.getParticipantsInRoom(newRoom.getRoomId());
-                    for (User participant : currentParticipantsOfNewRoom) {
-                        ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId());
-                        if (participantHandler != null) {
+                    List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId()); //
+                    for (User participant : currentParticipantsOfRoom) { //
+                        ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId()); //
+                        if (participantHandler != null) { //
                             participantHandler.sendChatRoomList(); // 각 참여자에게 최신 채팅방 목록을 보냅니다.
                         }
                     }
-                } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to create chat room", null);
-                    sendResponse(response);
+                } else { //
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to create chat room", null); //
+                    sendResponse(response); //
                 }
                 break;
 
@@ -192,14 +190,11 @@ public class ClientHandler implements Runnable {
                 sendChatRoomList();
                 break;
 
-            case GET_MESSAGES_IN_ROOM: // 이 부분이 올바르게 존재하는지 확인합니다.
+            case GET_MESSAGES_IN_ROOM:
                 int roomIdToGetMessages = (int) request.getData().get("roomId");
                 List<Message> messages = messageDAO.getMessagesInRoom(roomIdToGetMessages);
-                // 각 메시지에 대해 읽지 않은 사용자 수 계산 및 설정
                 for (Message msg : messages) {
                     int readCount = messageDAO.getReadCountForMessage(msg.getMessageId());
-                    // 현재 사용자가 참여하고 있는 채팅방의 총 참여자 수를 정확히 가져와야 합니다.
-                    // ChatRoomDAO.getParticipantsInRoom(roomIdToGetMessages).size()가 정확한지 확인.
                     int totalParticipants = chatRoomDAO.getParticipantsInRoom(roomIdToGetMessages).size();
                     msg.setUnreadCount(totalParticipants - readCount);
                 }
@@ -207,16 +202,14 @@ public class ClientHandler implements Runnable {
                 responseData.put("messages", messages);
                 response = new ServerResponse(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, true, "Messages loaded", responseData);
                 sendResponse(response);
-                break; // GET_MESSAGES_IN_ROOM 케이스 끝
+                break;
 
             case SEND_MESSAGE:
-                // ... (기존 SEND_MESSAGE 로직) ...
                 int currentRoomId = (int) request.getData().get("roomId");
                 String messageContent = (String) request.getData().get("content");
                 MessageType messageType = MessageType.valueOf((String) request.getData().get("messageType"));
                 boolean isNotice = (boolean) request.getData().get("isNotice");
 
-                // this.userId가 유효한지 확인 (로그인되지 않은 상태에서 메시지 보내는 것 방지)
                 if (this.userId == -1) {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot send message.", null);
                     sendResponse(response);
@@ -231,21 +224,16 @@ public class ClientHandler implements Runnable {
                 }
 
                 Message newMessage = new Message(currentRoomId, this.userId, sender.getNickname(), messageType, messageContent, isNotice);
-                // 서버가 메시지를 저장하고 브로드캐스트합니다. 이 내부에서 NEW_MESSAGE 응답이 처리됩니다.
                 server.broadcastMessageToRoom(newMessage, this.userId);
-                // 여기서는 별도의 SUCCESS 응답을 보내지 않아도 됩니다. (NEW_MESSAGE로 충분)
                 break;
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
                 if (messageDAO.markMessageAsRead(messageIdToRead, this.userId)) {
                     response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", null);
-                    // 해당 메시지가 속한 채팅방의 메시지들 다시 보내서 읽음 상태 업데이트
-                    Message readMsg = messageDAO.getMessagesInRoom(messageDAO.getMessagesInRoom(messageIdToRead).get(0).getRoomId()) // 메시지 ID로 채팅방 ID 찾기
-                            .stream().filter(m -> m.getMessageId() == messageIdToRead)
-                            .findFirst().orElse(null);
+                    Message readMsg = messageDAO.getMessageById(messageIdToRead);
                     if (readMsg != null) {
-                        server.updateUnreadCountsForRoom(readMsg.getRoomId()); // 해당 방의 모든 메시지 읽음 상태 갱신
+                        server.updateUnreadCountsForRoom(readMsg.getRoomId());
                     }
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read", null);
@@ -258,18 +246,15 @@ public class ClientHandler implements Runnable {
                 int userIdToInvite = (int) request.getData().get("userId");
                 if (chatRoomDAO.inviteUserToRoom(roomIdToInvite, userIdToInvite)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "User invited to room", null);
-                    // 초대받은 사용자에게 채팅방 목록 업데이트 알림
                     ClientHandler invitedHandler = server.getConnectedClients().get(userIdToInvite);
                     if (invitedHandler != null) {
                         invitedHandler.sendChatRoomList();
-                        // 초대받은 사용자에게 이전 대화 내용 전송
                         List<Message> previousMessages = messageDAO.getMessagesInRoom(roomIdToInvite);
                         Map<String, Object> roomMessagesData = new HashMap<>();
                         roomMessagesData.put("roomId", roomIdToInvite);
                         roomMessagesData.put("messages", previousMessages);
                         invitedHandler.sendResponse(new ServerResponse(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, true, "Previous messages for invited room", roomMessagesData));
                     }
-                    // 기존 참여자들에게도 업데이트 알림
                     server.notifyRoomParticipantsOfRoomUpdate(roomIdToInvite);
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to invite user to room", null);
@@ -298,11 +283,10 @@ public class ClientHandler implements Runnable {
                     String fileName = (String) request.getData().get("fileName");
                     byte[] fileBytes = (byte[]) request.getData().get("fileBytes");
                     int roomIdForFile = (int) request.getData().get("roomId");
-                    String filePath = "server_uploads/" + fileName; // 서버에 저장될 경로
+                    String filePath = "server_uploads/" + fileName;
 
                     Files.write(Paths.get(filePath), fileBytes);
 
-                    // 파일 경로를 메시지 내용으로 저장
                     User senderFile = userDAO.getUserByUserId(this.userId);
                     if (senderFile == null) {
                         response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Sender not found", null);
@@ -310,8 +294,8 @@ public class ClientHandler implements Runnable {
                         break;
                     }
                     Message fileMessage = new Message(roomIdForFile, this.userId, senderFile.getNickname(),
-                            MessageType.FILE, filePath, false); // isNotice는 false
-                    server.broadcastMessageToRoom(fileMessage, this.userId); // 파일 메시지 브로드캐스트
+                            MessageType.FILE, filePath, false);
+                    server.broadcastMessageToRoom(fileMessage, this.userId);
 
                     response = new ServerResponse(ServerResponse.ResponseType.FILE_UPLOAD_SUCCESS, true, "File uploaded successfully", null);
                 } catch (IOException e) {
@@ -345,10 +329,9 @@ public class ClientHandler implements Runnable {
                 UserStatus newStatus = isAway ? UserStatus.AWAY : UserStatus.ONLINE;
                 if (userDAO.updateUserStatus(this.userId, newStatus)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Status updated to " + newStatus, null);
-                    // 본인의 상태 변경을 친구들에게 알림
                     User currentUser = userDAO.getUserByUserId(this.userId);
                     if (currentUser != null) {
-                        currentUser.setStatus(newStatus); // 로컬 객체 상태도 업데이트
+                        currentUser.setStatus(newStatus);
                         server.notifyFriendStatusChange(currentUser);
                     }
                 } else {
@@ -357,8 +340,7 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-
-            case LEAVE_CHAT_ROOM: // <-- 이 새로운 케이스를 추가합니다.
+            case LEAVE_CHAT_ROOM:
                 if (this.userId == -1) {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot leave chat room.", null);
                     sendResponse(response);
@@ -370,13 +352,10 @@ public class ClientHandler implements Runnable {
 
                 if (success) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);
-                    sendResponse(response);
+                    sendResponse(response); // 나간 클라이언트에게 성공 응답 먼저
 
-                    // 해당 채팅방의 모든 참여자에게 채팅방 업데이트 알림 (참여자 수 변경)
-                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave);
-
-                    // 나간 사용자에게 채팅방 목록을 다시 전송하여 나간 방이 목록에서 사라지도록 합니다.
-                    sendChatRoomList();
+                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave); // 다른 참여자들에게 알림
+                    sendChatRoomList(); // 나간 클라이언트의 목록 업데이트
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null);
                     sendResponse(response);
@@ -390,19 +369,16 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // 클라이언트로 응답 전송
     public synchronized void sendResponse(ServerResponse response) {
         try {
             out.writeObject(response);
             out.flush();
         } catch (IOException e) {
             System.err.println("Error sending response to client " + userId + ": " + e.getMessage());
-            // 연결 끊김 처리 (선택 사항)
             server.removeClient(userId);
         }
     }
 
-    // 현재 클라이언트의 친구 목록을 전송
     private void sendFriendList() {
         List<User> friends = userDAO.getFriends(this.userId);
         Map<String, Object> data = new HashMap<>();
@@ -410,9 +386,7 @@ public class ClientHandler implements Runnable {
         sendResponse(new ServerResponse(ServerResponse.ResponseType.FRIEND_LIST_UPDATE, true, "Friend list updated", data));
     }
 
-    // 현재 클라이언트의 채팅방 목록을 전송
-    private void sendChatRoomList() {
-        // userId가 유효한 경우에만 요청 (로그인 전에는 userId가 -1일 수 있음)
+    public void sendChatRoomList() {
         if (this.userId != -1) {
             List<ChatRoom> chatRooms = chatRoomDAO.getChatRoomsByUserId(this.userId);
             Map<String, Object> data = new HashMap<>();
@@ -420,28 +394,10 @@ public class ClientHandler implements Runnable {
             sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, true, "Chat room list updated", data));
         } else {
             System.err.println("Attempted to send chat room list for unauthenticated user.");
-            // 로그인되지 않은 사용자에게는 빈 목록 또는 실패 응답을 보낼 수 있습니다.
             sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, false, "Not authenticated to get chat rooms.", new HashMap<>()));
         }
     }
 
-    // 특정 메시지가 속한 방의 ID를 찾아주는 헬퍼 메서드 (효율을 위해 DAO에 추가하는 것이 좋음)
-    private ChatRoom getChatRoomOfMessage(int messageId) {
-        String sql = "SELECT room_id FROM messages WHERE message_id = ?";
-        try (Connection conn = chat.compi.DB.DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, messageId);
-            ResultSet rs = pstmt.executeQuery();
-            if (rs.next()) {
-                return chatRoomDAO.getChatRoomById(rs.getInt("room_id"));
-            }
-        } catch (SQLException e) {
-            System.err.println("Error getting chat room of message: " + e.getMessage());
-        }
-        return null;
-    }
-
-    // 연결 종료
     private void closeConnection() {
         try {
             if (in != null) in.close();

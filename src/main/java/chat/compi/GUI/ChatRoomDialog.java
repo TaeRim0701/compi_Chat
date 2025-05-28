@@ -46,11 +46,14 @@ public class ChatRoomDialog extends JDialog {
         setSize(700, 500);
         setLocationRelativeTo(parent);
 
-        setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
+        // 변경: HIDE_ON_CLOSE 대신 DISPOSE_ON_CLOSE를 사용하여 창이 닫힐 때 리소스를 해제
+        setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE); //
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
-                System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " closed.");
+                // ChatClientGUI에서 openChatRoomDialogs 맵에서 이 다이얼로그를 제거하는 로직이 이미 존재하므로
+                // 여기서는 추가적인 작업 없이 콘솔 로그만 남겨둡니다.
+                System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " disposed.");
             }
         });
 
@@ -91,7 +94,7 @@ public class ChatRoomDialog extends JDialog {
             JMenuItem noticeMenuItem = new JMenuItem("공지 내역");
             noticeMenuItem.addActionListener(ev -> {
                 ((ChatClientGUI) getParent()).getNoticeFrame().setVisible(true);
-                chatClient.getNoticeMessages();
+                chatClient.getNoticeMessages(chatRoom.getRoomId()); // 현재 채팅방 ID 전달
             });
             popupMenu.add(noticeMenuItem);
 

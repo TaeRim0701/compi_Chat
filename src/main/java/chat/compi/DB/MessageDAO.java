@@ -136,30 +136,33 @@ public class MessageDAO {
     }
 
     /**
-     * 모든 공지 메시지 조회
+     * 특정 채팅방의 공지 메시지 조회
+     * @param roomId 공지 메시지를 조회할 채팅방 ID
      * @return 공지 메시지 리스트
      */
-    public List<Message> getAllNoticeMessages() {
+    public List<Message> getNoticeMessagesInRoom(int roomId) { // 메서드 이름 변경 및 roomId 파라미터 추가
         List<Message> notices = new ArrayList<>();
         String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
-                "WHERE m.is_notice = TRUE ORDER BY m.sent_at DESC";
+                "WHERE m.is_notice = TRUE AND m.room_id = ? ORDER BY m.sent_at DESC"; // room_id 조건 추가
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-            while (rs.next()) {
-                int messageId = rs.getInt("message_id");
-                int roomId = rs.getInt("room_id");
-                int senderId = rs.getInt("sender_id");
-                String senderNickname = rs.getString("sender_nickname");
-                MessageType messageType = MessageType.valueOf(rs.getString("message_type"));
-                String content = rs.getString("content");
-                LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
-                boolean isNotice = rs.getBoolean("is_notice");
-                notices.add(new Message(messageId, roomId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, roomId); // roomId 값 설정
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    int messageId = rs.getInt("message_id");
+                    int rId = rs.getInt("room_id");
+                    int senderId = rs.getInt("sender_id");
+                    String senderNickname = rs.getString("sender_nickname");
+                    MessageType messageType = MessageType.valueOf(rs.getString("message_type"));
+                    String content = rs.getString("content");
+                    LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
+                    boolean isNotice = rs.getBoolean("is_notice");
+                    notices.add(new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+                }
             }
         } catch (SQLException e) {
-            System.err.println("Error getting all notice messages: " + e.getMessage());
+            System.err.println("Error getting notice messages for room " + roomId + ": " + e.getMessage());
         }
         return notices;
     }

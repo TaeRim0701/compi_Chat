@@ -202,8 +202,10 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.INVITE_USER_TO_ROOM, data));
     }
 
-    public void getNoticeMessages() {
-        sendRequest(new ClientRequest(ClientRequest.RequestType.GET_NOTICE_MESSAGES, null));
+    public void getNoticeMessages(int roomId) { // roomId 파라미터 추가
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId); // roomId를 요청 데이터에 추가
+        sendRequest(new ClientRequest(ClientRequest.RequestType.GET_NOTICE_MESSAGES, data));
     }
 
     public void getTimelineEvents(int roomId) {

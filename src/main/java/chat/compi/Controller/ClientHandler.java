@@ -263,7 +263,8 @@ public class ClientHandler implements Runnable {
                 break;
 
             case GET_NOTICE_MESSAGES:
-                List<Message> noticeMessages = messageDAO.getAllNoticeMessages();
+                int noticeRoomId = (int) request.getData().get("roomId"); // 요청 데이터에서 roomId 가져오기
+                List<Message> noticeMessages = messageDAO.getNoticeMessagesInRoom(noticeRoomId); // roomId로 공지 조회
                 responseData.put("noticeMessages", noticeMessages);
                 response = new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Notice messages loaded", responseData);
                 sendResponse(response);

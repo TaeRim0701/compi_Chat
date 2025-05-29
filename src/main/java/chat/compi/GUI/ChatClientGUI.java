@@ -112,7 +112,7 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.FILE_DOWNLOAD_SUCCESS, this::handleFileDownloadSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, this::handleSystemNotification);
         chatClient.setResponseListener(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, this::handleRoomMessagesUpdate);
-        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleChatRoomCreationSuccess);
+        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleGeneralSuccessResponse); // 이름 변경
     }
 
     private void initComponents() {
@@ -216,8 +216,10 @@ public class ChatClientGUI extends JFrame {
 
     // --- 채팅방 다이얼로그 관리 ---
     private void openChatRoomDialog(ChatRoom room) {
+        System.out.println("openChatRoomDialog called for room ID: " + room.getRoomId() + ", name: " + room.getRoomName()); // 추가
         ChatRoomDialog dialog = openChatRoomDialogs.get(room.getRoomId());
         if (dialog == null) {
+            System.out.println("  Dialog for room " + room.getRoomId() + " not found in map. Creating new dialog."); // 추가
             dialog = new ChatRoomDialog(this, chatClient, room);
             openChatRoomDialogs.put(room.getRoomId(), dialog);
             dialog.addWindowListener(new WindowAdapter() {
@@ -225,8 +227,11 @@ public class ChatClientGUI extends JFrame {
                 public void windowClosed(WindowEvent e) {
                     openChatRoomDialogs.remove(room.getRoomId());
                     chatRoomList.clearSelection();
+                    System.out.println("  ChatRoomDialog for room " + room.getRoomId() + " closed and removed from map. Map size: " + openChatRoomDialogs.size()); // 추가
                 }
             });
+        } else {
+            System.out.println("  Dialog for room " + room.getRoomId() + " found in map. Re-using existing dialog."); // 추가
         }
         dialog.setVisible(true);
         dialog.toFront();
@@ -265,55 +270,43 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
-    private void handleChatRoomCreationSuccess(ServerResponse response) {
-        // CREATE_CHAT_ROOM 요청에 대한 SUCCESS 응답 처리
-        // 이 응답에는 새로 생성되거나 찾아진 ChatRoom 객체가 포함되어 있어야 함
-        if (response.isSuccess() && response.getData() != null && response.getData().containsKey("chatRoom")) {
-            ChatRoom createdOrFoundRoom = (ChatRoom) response.getData().get("chatRoom");
-            System.out.println("Chat room operation successful: " + createdOrFoundRoom.getRoomName() + ", Room ID: " + createdOrFoundRoom.getRoomId());
-            System.out.println("  Is Group Chat: " + createdOrFoundRoom.isGroupChat());
-            System.out.println("  Participants: " + createdOrFoundRoom.getParticipants().stream().map(User::getNickname).collect(Collectors.joining(", ")));
+    private void handleChatRoomCreationSuccessLogic(ServerResponse response) {
+        ChatRoom createdOrFoundRoom = (ChatRoom) response.getData().get("chatRoom");
+        System.out.println("Chat room operation successful: " + createdOrFoundRoom.getRoomName() + ", Room ID: " + createdOrFoundRoom.getRoomId());
+        System.out.println("  Is Group Chat: " + createdOrFoundRoom.isGroupChat());
+        System.out.println("  Participants: " + createdOrFoundRoom.getParticipants().stream().map(User::getNickname).collect(Collectors.joining(", ")));
 
-            // 친구 더블클릭으로 1:1 채팅방이 생성/선택되었을 경우
-            if (pendingPrivateChatUserId != -1 && !createdOrFoundRoom.isGroupChat()) {
-                System.out.println("  Detected pending private chat request for user ID: " + pendingPrivateChatUserId);
-                // 생성되거나 찾아진 1:1 채팅방의 참여자 중 상대방의 ID가 일치하는지 확인
-                boolean foundTargetFriend = createdOrFoundRoom.getParticipants().stream()
-                        .anyMatch(p -> p.getUserId() == pendingPrivateChatUserId && p.getUserId() != currentUser.getUserId());
-                System.out.println("  Found target friend in room participants: " + foundTargetFriend);
+        if (pendingPrivateChatUserId != -1 && !createdOrFoundRoom.isGroupChat()) {
+            System.out.println("  Detected pending private chat request for user ID: " + pendingPrivateChatUserId);
+            boolean foundTargetFriend = createdOrFoundRoom.getParticipants().stream()
+                    .anyMatch(p -> p.getUserId() == pendingPrivateChatUserId && p.getUserId() != currentUser.getUserId());
+            System.out.println("  Found target friend in room participants: " + foundTargetFriend);
 
-                if (foundTargetFriend) {
-                    SwingUtilities.invokeLater(() -> {
-                        System.out.println("Attempting to open chat room for pending user: " + pendingPrivateChatUserId);
-                        openChatRoomDialog(createdOrFoundRoom); // 이 부분이 실제로 채팅방을 여는 부분
-                        // 채팅방 목록에서 해당 방을 선택 상태로 만듦
-                        for (int i = 0; i < chatRoomListModel.size(); i++) {
-                            if (chatRoomListModel.getElementAt(i).getRoomId() == createdOrFoundRoom.getRoomId()) {
-                                chatRoomList.setSelectedIndex(i);
-                                chatRoomList.ensureIndexIsVisible(i);
-                                System.out.println("  Selected chat room in list: " + createdOrFoundRoom.getRoomName());
-                                break;
-                            }
+            if (foundTargetFriend) {
+                SwingUtilities.invokeLater(() -> {
+                    System.out.println("Attempting to open chat room for pending user: " + pendingPrivateChatUserId);
+                    // 여기서 openChatRoomDialog를 호출하고, pendingPrivateChatUserId는 InvokeLater 밖에서 즉시 초기화
+                    openChatRoomDialog(createdOrFoundRoom);
+                    for (int i = 0; i < chatRoomListModel.size(); i++) {
+                        if (chatRoomListModel.getElementAt(i).getRoomId() == createdOrFoundRoom.getRoomId()) {
+                            chatRoomList.setSelectedIndex(i);
+                            chatRoomList.ensureIndexIsVisible(i);
+                            System.out.println("  Selected chat room in list: " + createdOrFoundRoom.getRoomName());
+                            break;
                         }
-                    });
-                } else {
-                    System.out.println("  Target friend not found in created/found private chat room participants. Dialog will not open via this path.");
-                }
-                pendingPrivateChatUserId = -1; // 처리 후 초기화
-            } else if (pendingPrivateChatUserId != -1 && createdOrFoundRoom.isGroupChat()) {
-                System.out.println("  Pending private chat was requested, but server returned a group chat. This shouldn't happen.");
-                pendingPrivateChatUserId = -1; // Reset anyway
+                    }
+                });
             } else {
-                System.out.println("  Not a pending private chat request, or pendingPrivateChatUserId is -1. Dialog opening deferred to chat room list double-click.");
+                System.out.println("  Target friend not found in created/found private chat room participants. Dialog will not open via this path.");
             }
-        } else if (!response.isSuccess() && "Failed to create chat room".equals(response.getMessage())) {
-            SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(this, "채팅방 생성/열기 실패: " + response.getMessage(), "오류", JOptionPane.ERROR_MESSAGE);
-            });
+            pendingPrivateChatUserId = -1; // 처리 후 즉시 초기화
+            System.out.println("  pendingPrivateChatUserId reset to: " + pendingPrivateChatUserId);
+        } else if (pendingPrivateChatUserId != -1 && createdOrFoundRoom.isGroupChat()) {
+            System.out.println("  Pending private chat was requested, but server returned a group chat. This shouldn't happen.");
             pendingPrivateChatUserId = -1;
-            System.out.println("  Chat room creation/opening failed: " + response.getMessage());
+            System.out.println("  pendingPrivateChatUserId reset to: " + pendingPrivateChatUserId);
         } else {
-            System.out.println("  Unexpected SUCCESS response without chatRoom data or not a SUCCESS response for chat room creation.");
+            System.out.println("  Not a pending private chat request, or pendingPrivateChatUserId is -1. Dialog opening deferred to chat room list double-click.");
         }
     }
 
@@ -449,6 +442,24 @@ public class ChatClientGUI extends JFrame {
             int unreadRoomId = (int) response.getData().get("unreadRoomId");
             appendSystemNotification(notificationMessage, unreadRoomId);
         });
+    }
+
+    // 새로운 범용 성공 응답 처리 메서드
+    private void handleGeneralSuccessResponse(ServerResponse response) {
+        System.out.println("handleGeneralSuccessResponse called. Message: " + response.getMessage() + ", Data keys: " + (response.getData() != null ? response.getData().keySet() : "none"));
+
+        // 1. 채팅방 생성/조회 성공 처리
+        if (response.getData() != null && response.getData().containsKey("chatRoom")) {
+            handleChatRoomCreationSuccessLogic(response); // 기존 로직을 별도 메서드로 분리
+        }
+        // 2. 다른 종류의 SUCCESS 응답 처리 (필요하다면 여기에 추가)
+        else if ("Friend added successfully".equals(response.getMessage())) {
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "친구가 추가되었습니다.", "성공", JOptionPane.INFORMATION_MESSAGE));
+        }
+        else if ("Logout successful".equals(response.getMessage())) {
+            // 로그아웃은 이미 WindowClosing에서 처리되므로 여기서는 특별히 할 것 없음.
+            // 또는 명시적인 로그아웃 메시지 띄우기
+        }
     }
 
     // --- 별도 창 기능 (Notice, Timeline, Unread) ---

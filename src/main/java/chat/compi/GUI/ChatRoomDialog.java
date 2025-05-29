@@ -68,11 +68,11 @@ public class ChatRoomDialog extends JDialog {
             }
         });
 
-        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, response -> {
-            if (response.isSuccess() && "Left chat room successfully.".equals(response.getMessage())) {
-                System.out.println("User successfully left chat room: " + chatRoom.getRoomName() + ". GUI update will follow from ChatClientGUI.");
-            }
-        });
+//        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, response -> {
+//            if (response.isSuccess() && "Left chat room successfully.".equals(response.getMessage())) {
+//                System.out.println("User successfully left chat room: " + chatRoom.getRoomName() + ". GUI update will follow from ChatClientGUI.");
+//            }
+//        });
     }
 
     private void initComponents() {

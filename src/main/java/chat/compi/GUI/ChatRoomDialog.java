@@ -1,3 +1,4 @@
+// ChatRoomDialog.java
 package chat.compi.GUI;
 
 import chat.compi.Controller.ChatClient;
@@ -46,13 +47,10 @@ public class ChatRoomDialog extends JDialog {
         setSize(700, 500);
         setLocationRelativeTo(parent);
 
-        // 변경: HIDE_ON_CLOSE 대신 DISPOSE_ON_CLOSE를 사용하여 창이 닫힐 때 리소스를 해제
-        setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE); //
+        setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
-                // ChatClientGUI에서 openChatRoomDialogs 맵에서 이 다이얼로그를 제거하는 로직이 이미 존재하므로
-                // 여기서는 추가적인 작업 없이 콘솔 로그만 남겨둡니다.
                 System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " disposed.");
             }
         });
@@ -67,12 +65,6 @@ public class ChatRoomDialog extends JDialog {
                 }
             }
         });
-
-//        chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, response -> {
-//            if (response.isSuccess() && "Left chat room successfully.".equals(response.getMessage())) {
-//                System.out.println("User successfully left chat room: " + chatRoom.getRoomName() + ". GUI update will follow from ChatClientGUI.");
-//            }
-//        });
     }
 
     private void initComponents() {
@@ -94,18 +86,16 @@ public class ChatRoomDialog extends JDialog {
             JMenuItem noticeMenuItem = new JMenuItem("공지 내역");
             noticeMenuItem.addActionListener(ev -> {
                 ((ChatClientGUI) getParent()).getNoticeFrame().setVisible(true);
-                chatClient.getNoticeMessages(chatRoom.getRoomId()); // 현재 채팅방 ID 전달
+                chatClient.getNoticeMessages(chatRoom.getRoomId());
             });
             popupMenu.add(noticeMenuItem);
 
-            if (chatRoom.isGroupChat()) {
-                JMenuItem timelineMenuItem = new JMenuItem("타임라인");
-                timelineMenuItem.addActionListener(ev -> {
-                    ((ChatClientGUI) getParent()).getTimelineFrame().setVisible(true);
-                    chatClient.getTimelineEvents(chatRoom.getRoomId());
-                });
-                popupMenu.add(timelineMenuItem);
-            }
+            JMenuItem timelineMenuItem = new JMenuItem("타임라인");
+            timelineMenuItem.addActionListener(ev -> {
+                ((ChatClientGUI) getParent()).getTimelineFrame().setVisible(true);
+                chatClient.getTimelineEvents(chatRoom.getRoomId());
+            });
+            popupMenu.add(timelineMenuItem);
 
             popupMenu.addSeparator();
 
@@ -227,56 +217,92 @@ public class ChatRoomDialog extends JDialog {
         }
 
         try {
-            String color = "black";
+            String backgroundColor;
             String fontWeight = "normal";
             String fontStyle = "normal";
-            String backgroundColor = "white";
             String textColor = "black";
-            String contentToShow = message.getContent();
             String prefix = "";
             String suffix = "";
+            String outerDivAlign; // 메시지 버블을 좌우로 정렬할 부모 div의 text-align
+            String innerBubbleMargin; // 메시지 버블이 한쪽으로 치우치도록 반대쪽에 마진 주기
 
+            // 내 메시지인 경우 (오른쪽 정렬)
+            if (message.getSenderId() == currentUser.getUserId()) {
+                backgroundColor = "#DCF8C6"; // 연한 초록색
+                outerDivAlign = "text-align: right;";
+                innerBubbleMargin = "margin-left: 15%;"; // 오른쪽으로 밀기
+            } else { // 상대방이 보낸 메시지인 경우 (왼쪽 정렬)
+                backgroundColor = "#E5E5EA"; // 연한 회색
+                outerDivAlign = "text-align: left;";
+                innerBubbleMargin = "margin-right: 15%;"; // 왼쪽으로 밀기
+            }
+
+            // 공지 메시지 스타일 (우선순위 높음)
+            // 공지는 중앙 정렬, 배경색 노란색, 글씨 빨간색, 굵게
             if (message.isNotice()) {
-                backgroundColor = "#FFF2CC";
+                backgroundColor = "#FFF2CC"; // 노란색 계열
                 textColor = "red";
                 fontWeight = "bold";
                 prefix = "<span style='color: red;'>[공지] </span>";
+                outerDivAlign = "text-align: center;"; // 중앙 정렬
+                innerBubbleMargin = "margin-left: auto; margin-right: auto;"; // 중앙 정렬을 위한 자동 마진
             }
 
-            if (message.getMessageType() == MessageType.FILE || message.getMessageType() == MessageType.IMAGE) {
+            // 메시지 타입별 스타일
+            String contentToShow = message.getContent();
+            String timestampAndSender;
+
+            // 시스템 메시지나 명령어 메시지는 발신자 닉네임 대신 특정 텍스트를 사용하며 중앙 정렬
+            if (message.getMessageType() == MessageType.COMMAND || message.getMessageType() == MessageType.SYSTEM) {
+                fontStyle = "italic";
+                textColor = (message.getMessageType() == MessageType.COMMAND) ? "blue" : "gray";
+                prefix = (message.getMessageType() == MessageType.COMMAND) ? "<span style='color: blue;'>[명령] </span>" : "<span style='color: gray;'>[시스템] </span>";
+                outerDivAlign = "text-align: center;"; // 중앙 정렬
+                innerBubbleMargin = "margin-left: auto; margin-right: auto;"; // 중앙 정렬을 위한 자동 마진
+                timestampAndSender = message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")); // 시간만 표시 (시스템/명령)
+            } else if (message.getMessageType() == MessageType.FILE || message.getMessageType() == MessageType.IMAGE) {
                 if (message.getContent() != null && !message.getContent().trim().isEmpty()) {
                     String fileName = new File(message.getContent()).getName();
                     contentToShow = "<a href='" + message.getContent() + "'>" + fileName + " (클릭하여 다운로드)</a>";
                 } else {
                     contentToShow = "[잘못된 파일 링크]";
                 }
-            } else if (message.getMessageType() == MessageType.COMMAND) {
-                fontStyle = "italic";
-                color = "blue";
-                prefix = "<span style='color: blue;'>[명령] </span>";
-            } else if (message.getMessageType() == MessageType.SYSTEM) {
-                fontStyle = "italic";
-                color = "gray";
-                prefix = "<span style='color: gray;'>[시스템] </span>";
+                // 파일 메시지는 발신자에 따라 정렬 유지
+                timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
+                        message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
+                        message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
+            } else { // 일반 텍스트 메시지
+                timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
+                        message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
+                        message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
             }
 
-            if (message.getUnreadCount() > 0) {
+
+            // 미열람 카운트 표시 (내가 보낸 메시지에만)
+            if (message.getSenderId() == currentUser.getUserId() && message.getUnreadCount() > 0) {
                 suffix = " <span style='font-size: 0.8em; color: gray;'>(" + message.getUnreadCount() + "명 미열람)</span>";
             }
 
-
+            // HTML 메시지 구조:
+            // 각 메시지 블록은 새로운 줄에서 시작하도록 `clear: both;` 적용
+            // 부모 div의 `text-align`으로 자식인 메시지 버블 (display: inline-block)을 정렬
             String htmlMessage = String.format(
-                    "<div style='background-color: %s; padding: 5px; margin-bottom: 3px; border-radius: 5px;'>" +
-                            "<span style='color: #888; font-size: 0.9em;'>%s</span> " +
-                            "<span style='font-weight: %s; color: %s; font-style: %s;'>%s%s%s</span></div>",
+                    "<div style='clear: both; margin-bottom: 5px; %s'>" + // 외부 컨테이너: 줄 바꿈, 아래쪽 마진, 좌우 정렬
+                            "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" + // 메시지 버블: 인라인 블록, 배경색, 패딩, 둥근 모서리, 최대 폭, 줄 바꿈, 여백
+                            "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" + // 시간 및 발신자: 작은 글씨, 블록 요소로 한 줄 차지, 버블 내 정렬
+                            "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" + // 메시지 내용: 굵기, 색상, 스타일, 블록 요소로 한 줄 차지
+                            "</div></div>",
+                    outerDivAlign, // (text-align: left; / text-align: right; / text-align: center;)
                     backgroundColor,
-                    message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname(),
+                    innerBubbleMargin, // (margin-left: 15%; / margin-right: 15%; / margin-left: auto; margin-right: auto;)
+                    (message.getSenderId() == currentUser.getUserId() || message.getMessageType() == MessageType.SYSTEM || message.isNotice() || message.getMessageType() == MessageType.COMMAND ? "text-align: right;" : "text-align: left;"), // 버블 내부의 시간/발신자 정렬
+                    timestampAndSender,
                     fontWeight, textColor, fontStyle, prefix, contentToShow, suffix
             );
 
             editorKit.insertHTML(doc, doc.getLength(), htmlMessage, 0, 0, null);
             chatArea.setCaretPosition(doc.getLength());
-            System.out.println("Message appended: " + message.getContent());
+            // System.out.println("Message appended: " + message.getContent() + " (Sender: " + message.getSenderId() + ", Current User: " + currentUser.getUserId() + ")");
 
         } catch (BadLocationException | IOException e) {
             System.err.println("Error appending message to chat area: " + e.getMessage());

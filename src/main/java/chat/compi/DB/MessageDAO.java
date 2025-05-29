@@ -4,6 +4,7 @@ package chat.compi.DB;
 import chat.compi.Entity.Message;
 import chat.compi.Entity.MessageType;
 import chat.compi.Entity.User;
+import chat.compi.Entity.UserStatus;
 
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -211,5 +212,33 @@ public class MessageDAO {
             System.err.println("Error checking if message is read by user: " + e.getMessage());
         }
         return false;
+    }
+
+    /**
+     * 특정 메시지를 읽은 사용자 목록 조회
+     * @param messageId 메시지 ID
+     * @return 읽은 사용자 User 객체 리스트
+     */
+    public List<User> getReadersForMessage(int messageId) {
+        List<User> readers = new ArrayList<>();
+        String sql = "SELECT u.user_id, u.username, u.nickname, u.status " +
+                "FROM message_reads mr JOIN users u ON mr.user_id = u.user_id " +
+                "WHERE mr.message_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, messageId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    int userId = rs.getInt("user_id");
+                    String username = rs.getString("username");
+                    String nickname = rs.getString("nickname");
+                    UserStatus status = UserStatus.valueOf(rs.getString("status"));
+                    readers.add(new User(userId, username, nickname, status));
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Error getting readers for message " + messageId + ": " + e.getMessage());
+        }
+        return readers;
     }
 }

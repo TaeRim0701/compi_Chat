@@ -1,4 +1,3 @@
-// ChatRoomDialog.java
 package chat.compi.GUI;
 
 import chat.compi.Controller.ChatClient;
@@ -22,6 +21,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @SuppressWarnings("unchecked")
 public class ChatRoomDialog extends JDialog {
@@ -37,6 +37,8 @@ public class ChatRoomDialog extends JDialog {
     private JButton sendButton;
     private JButton fileAttachButton;
     private JCheckBox noticeCheckBox;
+
+    private JLabel roomNameLabel; // 클래스 멤버로 선언
 
     public ChatRoomDialog(JFrame parent, ChatClient client, ChatRoom room) {
         super(parent, room.getRoomName(), false);
@@ -72,7 +74,7 @@ public class ChatRoomDialog extends JDialog {
 
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setBorder(new EmptyBorder(5, 10, 5, 10));
-        JLabel roomNameLabel = new JLabel("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>");
+        roomNameLabel = new JLabel("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>"); // 멤버 변수에 할당
         topPanel.add(roomNameLabel, BorderLayout.WEST);
 
         JButton menuButton = new JButton("메뉴");
@@ -152,6 +154,14 @@ public class ChatRoomDialog extends JDialog {
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
     }
 
+    // 새로운 메서드: 채팅방 정보 업데이트
+    public void updateChatRoomInfo(ChatRoom updatedRoom) {
+        this.chatRoom = updatedRoom; // 내부 chatRoom 객체 업데이트
+        setTitle(chatRoom.getRoomName()); // 다이얼로그 제목 업데이트
+        roomNameLabel.setText("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>"); // 참여자 수 업데이트
+        System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " updated. New participant count: " + chatRoom.getParticipants().size());
+    }
+
     private void sendMessage() {
         String content = messageInput.getText().trim();
         if (content.isEmpty()) {
@@ -223,8 +233,8 @@ public class ChatRoomDialog extends JDialog {
             String textColor = "black";
             String prefix = "";
             String suffix = "";
-            String outerDivAlign; // 메시지 버블을 좌우로 정렬할 부모 div의 text-align
-            String innerBubbleMargin; // 메시지 버블이 한쪽으로 치우치도록 반대쪽에 마진 주기
+            String outerDivAlign;
+            String innerBubbleMargin;
 
             // 내 메시지인 경우 (오른쪽 정렬)
             if (message.getSenderId() == currentUser.getUserId()) {
@@ -238,7 +248,6 @@ public class ChatRoomDialog extends JDialog {
             }
 
             // 공지 메시지 스타일 (우선순위 높음)
-            // 공지는 중앙 정렬, 배경색 노란색, 글씨 빨간색, 굵게
             if (message.isNotice()) {
                 backgroundColor = "#FFF2CC"; // 노란색 계열
                 textColor = "red";
@@ -252,14 +261,17 @@ public class ChatRoomDialog extends JDialog {
             String contentToShow = message.getContent();
             String timestampAndSender;
 
-            // 시스템 메시지나 명령어 메시지는 발신자 닉네임 대신 특정 텍스트를 사용하며 중앙 정렬
             if (message.getMessageType() == MessageType.COMMAND || message.getMessageType() == MessageType.SYSTEM) {
                 fontStyle = "italic";
                 textColor = (message.getMessageType() == MessageType.COMMAND) ? "blue" : "gray";
                 prefix = (message.getMessageType() == MessageType.COMMAND) ? "<span style='color: blue;'>[명령] </span>" : "<span style='color: gray;'>[시스템] </span>";
-                outerDivAlign = "text-align: center;"; // 중앙 정렬
-                innerBubbleMargin = "margin-left: auto; margin-right: auto;"; // 중앙 정렬을 위한 자동 마진
-                timestampAndSender = message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")); // 시간만 표시 (시스템/명령)
+                outerDivAlign = "text-align: center;";
+                innerBubbleMargin = "margin-left: auto; margin-right: auto;";
+                timestampAndSender = message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm"));
+                // 디버그용 로그 추가 시작
+                System.out.println("DEBUG (Client-ChatRoomDialog): Applying system/command style for message: " + message.getContent());
+                System.out.println("DEBUG (Client-ChatRoomDialog): outerDivAlign: " + outerDivAlign + ", innerBubbleMargin: " + innerBubbleMargin);
+                // 디버그용 로그 추가 끝
             } else if (message.getMessageType() == MessageType.FILE || message.getMessageType() == MessageType.IMAGE) {
                 if (message.getContent() != null && !message.getContent().trim().isEmpty()) {
                     String fileName = new File(message.getContent()).getName();
@@ -267,7 +279,6 @@ public class ChatRoomDialog extends JDialog {
                 } else {
                     contentToShow = "[잘못된 파일 링크]";
                 }
-                // 파일 메시지는 발신자에 따라 정렬 유지
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
@@ -277,32 +288,41 @@ public class ChatRoomDialog extends JDialog {
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
             }
 
+            // '읽은 사람' 목록 또는 '미열람자 수' 표시 로직
+            // 시스템 메시지에는 읽음 정보 표시 안 함
+            if (message.getMessageType() != MessageType.SYSTEM && message.getReaders() != null) {
+                List<String> readerNicknames = message.getReaders().stream()
+                        .filter(reader -> reader.getUserId() != message.getSenderId())
+                        .map(User::getNickname)
+                        .collect(Collectors.toList());
 
-            // 미열람 카운트 표시 (내가 보낸 메시지에만)
-            if (message.getSenderId() == currentUser.getUserId() && message.getUnreadCount() > 0) {
-                suffix = " <span style='font-size: 0.8em; color: gray;'>(" + message.getUnreadCount() + "명 미열람)</span>";
+                if (!readerNicknames.isEmpty()) {
+                    suffix = " <span style='font-size: 0.7em; color: #666;'>읽음: " + String.join(", ", readerNicknames) + "</span>";
+                } else {
+                    if (message.getSenderId() == currentUser.getUserId() && message.getUnreadCount() > 0) {
+                        suffix = " <span style='font-size: 0.8em; color: gray;'>(" + message.getUnreadCount() + "명 미열람)</span>";
+                    }
+                }
             }
 
-            // HTML 메시지 구조:
-            // 각 메시지 블록은 새로운 줄에서 시작하도록 `clear: both;` 적용
-            // 부모 div의 `text-align`으로 자식인 메시지 버블 (display: inline-block)을 정렬
+
+            // HTML 메시지 구조
             String htmlMessage = String.format(
-                    "<div style='clear: both; margin-bottom: 5px; %s'>" + // 외부 컨테이너: 줄 바꿈, 아래쪽 마진, 좌우 정렬
-                            "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" + // 메시지 버블: 인라인 블록, 배경색, 패딩, 둥근 모서리, 최대 폭, 줄 바꿈, 여백
-                            "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" + // 시간 및 발신자: 작은 글씨, 블록 요소로 한 줄 차지, 버블 내 정렬
-                            "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" + // 메시지 내용: 굵기, 색상, 스타일, 블록 요소로 한 줄 차지
+                    "<div style='clear: both; margin-bottom: 5px; %s'>" +
+                            "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" +
+                            "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" +
+                            "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" +
                             "</div></div>",
-                    outerDivAlign, // (text-align: left; / text-align: right; / text-align: center;)
+                    outerDivAlign,
                     backgroundColor,
-                    innerBubbleMargin, // (margin-left: 15%; / margin-right: 15%; / margin-left: auto; margin-right: auto;)
-                    (message.getSenderId() == currentUser.getUserId() || message.getMessageType() == MessageType.SYSTEM || message.isNotice() || message.getMessageType() == MessageType.COMMAND ? "text-align: right;" : "text-align: left;"), // 버블 내부의 시간/발신자 정렬
+                    innerBubbleMargin,
+                    (message.getSenderId() == currentUser.getUserId() || message.getMessageType() == MessageType.SYSTEM || message.isNotice() || message.getMessageType() == MessageType.COMMAND ? "text-align: right;" : "text-align: left;"),
                     timestampAndSender,
                     fontWeight, textColor, fontStyle, prefix, contentToShow, suffix
             );
 
             editorKit.insertHTML(doc, doc.getLength(), htmlMessage, 0, 0, null);
             chatArea.setCaretPosition(doc.getLength());
-            // System.out.println("Message appended: " + message.getContent() + " (Sender: " + message.getSenderId() + ", Current User: " + currentUser.getUserId() + ")");
 
         } catch (BadLocationException | IOException e) {
             System.err.println("Error appending message to chat area: " + e.getMessage());

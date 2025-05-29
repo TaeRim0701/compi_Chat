@@ -82,9 +82,9 @@ public class ClientHandler implements Runnable {
                     server.addClient(userId, this);
                     responseData.put("user", loggedInUser);
                     response = new ServerResponse(ServerResponse.ResponseType.LOGIN_SUCCESS, true, "Login successful", responseData);
-                    sendResponse(response); // 로그인 성공 응답 먼저 보내기
-                    sendFriendList(); // 친구 목록
-                    sendChatRoomList(); // 채팅방 목록
+                    sendResponse(response);
+                    sendFriendList();
+                    sendChatRoomList();
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Invalid username or password", null);
                     sendResponse(response);
@@ -145,44 +145,53 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                ChatRoom createdOrFoundRoom = null; //
+                ChatRoom createdOrFoundRoom = null;
 
-                if (!isGroupChatRequest) { // 1:1 대화
+                if (!isGroupChatRequest) {
                     if (invitedUserIds.size() != 2) {
                         response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Private chat requires exactly 2 participants.", null);
                         sendResponse(response);
                         break;
                     }
                     List<Integer> sortedUserIds = invitedUserIds.stream().sorted().collect(Collectors.toList());
-                    createdOrFoundRoom = chatRoomDAO.getExistingPrivateChatRoom(sortedUserIds.get(0), sortedUserIds.get(1)); //
+                    createdOrFoundRoom = chatRoomDAO.getExistingPrivateChatRoom(sortedUserIds.get(0), sortedUserIds.get(1));
 
-                    if (createdOrFoundRoom == null) { //
-                        createdOrFoundRoom = chatRoomDAO.createChatRoom("", false, this.userId, invitedUserIds); //
+                    if (createdOrFoundRoom == null) {
+                        createdOrFoundRoom = chatRoomDAO.createChatRoom("", false, this.userId, invitedUserIds);
                     }
-                } else { // 그룹 채팅
+                } else {
                     if (roomName == null || roomName.trim().isEmpty()) {
                         response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Group chat room name is required.", null);
                         sendResponse(response);
                         break;
                     }
-                    createdOrFoundRoom = chatRoomDAO.createChatRoom(roomName, true, this.userId, invitedUserIds); //
+                    createdOrFoundRoom = chatRoomDAO.createChatRoom(roomName, true, this.userId, invitedUserIds);
                 }
 
-                if (createdOrFoundRoom != null) { //
-                    responseData.put("chatRoom", createdOrFoundRoom); //
-                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Chat room created", responseData); //
-                    sendResponse(response); // 요청한 클라이언트에게 먼저 응답 (createdOrFoundRoom 포함)
+                if (createdOrFoundRoom != null) {
+                    responseData.put("chatRoom", createdOrFoundRoom);
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Chat room created", responseData);
+                    sendResponse(response);
 
-                    List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId()); //
-                    for (User participant : currentParticipantsOfRoom) { //
-                        ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId()); //
-                        if (participantHandler != null) { //
-                            participantHandler.sendChatRoomList(); // 각 참여자에게 최신 채팅방 목록을 보냅니다.
+                    List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId());
+                    // 채팅방 생성 시 시스템 메시지 브로드캐스트
+                    String participantNames = currentParticipantsOfRoom.stream()
+                            .map(User::getNickname)
+                            .collect(Collectors.joining(", "));
+                    String creationMessageContent = participantNames + " 님이 입장했습니다.";
+                    // 시스템 메시지 발신자 ID로 server.getSystemUserId() 사용
+                    Message creationSystemMessage = new Message(createdOrFoundRoom.getRoomId(), server.getSystemUserId(), "시스템", MessageType.SYSTEM, creationMessageContent, false);
+                    server.broadcastMessageToRoom(creationSystemMessage, server.getSystemUserId()); // Sender ID도 시스템 사용자 ID로
+
+                    for (User participant : currentParticipantsOfRoom) {
+                        ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId());
+                        if (participantHandler != null) {
+                            participantHandler.sendChatRoomList();
                         }
                     }
-                } else { //
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to create chat room", null); //
-                    sendResponse(response); //
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to create chat room", null);
+                    sendResponse(response);
                 }
                 break;
 
@@ -194,9 +203,10 @@ public class ClientHandler implements Runnable {
                 int roomIdToGetMessages = (int) request.getData().get("roomId");
                 List<Message> messages = messageDAO.getMessagesInRoom(roomIdToGetMessages);
                 for (Message msg : messages) {
-                    int readCount = messageDAO.getReadCountForMessage(msg.getMessageId());
+                    List<User> readers = messageDAO.getReadersForMessage(msg.getMessageId());
+                    msg.setReaders(readers);
                     int totalParticipants = chatRoomDAO.getParticipantsInRoom(roomIdToGetMessages).size();
-                    msg.setUnreadCount(totalParticipants - readCount);
+                    msg.setUnreadCount(totalParticipants - readers.size());
                 }
                 responseData.put("roomId", roomIdToGetMessages);
                 responseData.put("messages", messages);
@@ -246,10 +256,27 @@ public class ClientHandler implements Runnable {
                 int userIdToInvite = (int) request.getData().get("userId");
                 if (chatRoomDAO.inviteUserToRoom(roomIdToInvite, userIdToInvite)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "User invited to room", null);
+                    sendResponse(response);
+
+                    // 사용자 초대 시 시스템 메시지 브로드캐스트
+                    User invitedUser = userDAO.getUserByUserId(userIdToInvite);
+                    if (invitedUser != null) {
+                        String inviteMessageContent = invitedUser.getNickname() + " 님이 입장했습니다.";
+                        // 시스템 메시지 발신자 ID로 server.getSystemUserId() 사용
+                        Message inviteSystemMessage = new Message(roomIdToInvite, server.getSystemUserId(), "시스템", MessageType.SYSTEM, inviteMessageContent, false);
+                        server.broadcastMessageToRoom(inviteSystemMessage, server.getSystemUserId()); // Sender ID도 시스템 사용자 ID로
+                    }
+
                     ClientHandler invitedHandler = server.getConnectedClients().get(userIdToInvite);
                     if (invitedHandler != null) {
                         invitedHandler.sendChatRoomList();
                         List<Message> previousMessages = messageDAO.getMessagesInRoom(roomIdToInvite);
+                        for (Message msg : previousMessages) {
+                            List<User> readers = messageDAO.getReadersForMessage(msg.getMessageId());
+                            msg.setReaders(readers);
+                            int totalParticipants = chatRoomDAO.getParticipantsInRoom(roomIdToInvite).size();
+                            msg.setUnreadCount(totalParticipants - readers.size());
+                        }
                         Map<String, Object> roomMessagesData = new HashMap<>();
                         roomMessagesData.put("roomId", roomIdToInvite);
                         roomMessagesData.put("messages", previousMessages);
@@ -263,8 +290,8 @@ public class ClientHandler implements Runnable {
                 break;
 
             case GET_NOTICE_MESSAGES:
-                int noticeRoomId = (int) request.getData().get("roomId"); // 요청 데이터에서 roomId 가져오기
-                List<Message> noticeMessages = messageDAO.getNoticeMessagesInRoom(noticeRoomId); // roomId로 공지 조회
+                int noticeRoomId = (int) request.getData().get("roomId");
+                List<Message> noticeMessages = messageDAO.getNoticeMessagesInRoom(noticeRoomId);
                 responseData.put("noticeMessages", noticeMessages);
                 response = new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Notice messages loaded", responseData);
                 sendResponse(response);
@@ -353,14 +380,14 @@ public class ClientHandler implements Runnable {
 
                 if (success) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);
-                    sendResponse(response); // 나간 클라이언트에게 성공 응답 먼저
+                    sendResponse(response);
 
-                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave); // 다른 참여자들에게 알림
-                    sendChatRoomList(); // 나간 클라이언트의 목록 업데이트
+                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave);
+                    sendChatRoomList();
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null);
-                    sendResponse(response);
                 }
+                sendResponse(response);
                 break;
 
             default:

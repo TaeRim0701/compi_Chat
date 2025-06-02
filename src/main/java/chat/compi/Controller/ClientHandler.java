@@ -174,14 +174,12 @@ public class ClientHandler implements Runnable {
                     sendResponse(response);
 
                     List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId());
-                    // 채팅방 생성 시 시스템 메시지 브로드캐스트
                     String participantNames = currentParticipantsOfRoom.stream()
                             .map(User::getNickname)
                             .collect(Collectors.joining(", "));
                     String creationMessageContent = participantNames + " 님이 입장했습니다.";
-                    // 시스템 메시지 발신자 ID로 server.getSystemUserId() 사용
                     Message creationSystemMessage = new Message(createdOrFoundRoom.getRoomId(), server.getSystemUserId(), "시스템", MessageType.SYSTEM, creationMessageContent, false);
-                    server.broadcastMessageToRoom(creationSystemMessage, server.getSystemUserId()); // Sender ID도 시스템 사용자 ID로
+                    server.broadcastMessageToRoom(creationSystemMessage, server.getSystemUserId());
 
                     for (User participant : currentParticipantsOfRoom) {
                         ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId());
@@ -218,7 +216,7 @@ public class ClientHandler implements Runnable {
                 int currentRoomId = (int) request.getData().get("roomId");
                 String messageContent = (String) request.getData().get("content");
                 MessageType messageType = MessageType.valueOf((String) request.getData().get("messageType"));
-                boolean isNotice = (boolean) request.getData().get("isNotice");
+                boolean isNotice = (boolean) request.getData().get("isNotice"); // 현재는 항상 false로 클라이언트에서 보냄
 
                 if (this.userId == -1) {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot send message.", null);
@@ -258,13 +256,11 @@ public class ClientHandler implements Runnable {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "User invited to room", null);
                     sendResponse(response);
 
-                    // 사용자 초대 시 시스템 메시지 브로드캐스트
                     User invitedUser = userDAO.getUserByUserId(userIdToInvite);
                     if (invitedUser != null) {
                         String inviteMessageContent = invitedUser.getNickname() + " 님이 입장했습니다.";
-                        // 시스템 메시지 발신자 ID로 server.getSystemUserId() 사용
                         Message inviteSystemMessage = new Message(roomIdToInvite, server.getSystemUserId(), "시스템", MessageType.SYSTEM, inviteMessageContent, false);
-                        server.broadcastMessageToRoom(inviteSystemMessage, server.getSystemUserId()); // Sender ID도 시스템 사용자 ID로
+                        server.broadcastMessageToRoom(inviteSystemMessage, server.getSystemUserId());
                     }
 
                     ClientHandler invitedHandler = server.getConnectedClients().get(userIdToInvite);
@@ -287,6 +283,38 @@ public class ClientHandler implements Runnable {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to invite user to room", null);
                 }
                 sendResponse(response);
+                break;
+
+            case MARK_AS_NOTICE: // 새로 추가된 요청 타입 처리
+                int messageIdToMark = (int) request.getData().get("messageId");
+                boolean markAsNotice = (boolean) request.getData().get("isNotice");
+                int roomIdForNotice = (int) request.getData().get("roomId"); // 클라이언트에서 전송된 roomId
+                if (messageDAO.updateMessageNoticeStatus(messageIdToMark, markAsNotice)) {
+                    responseData.put("messageId", messageIdToMark);
+                    responseData.put("isNotice", markAsNotice);
+                    responseData.put("roomId", roomIdForNotice); // roomId를 응답에 포함
+                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_MARKED_AS_NOTICE_SUCCESS, true, "메시지 공지 상태가 업데이트되었습니다.", responseData);
+                    sendResponse(response);
+
+                    // 공지 상태 변경 후 해당 채팅방의 메시지 목록을 갱신하도록 요청 (UI 재렌더링)
+                    // server.updateUnreadCountsForRoom(roomIdForNotice); // 이 메서드는 읽음 수 갱신 목적이므로 부적절할 수 있음.
+                    // 대신 모든 참여자에게 NEW_MESSAGE를 보내서 메시지 자체를 업데이트하거나,
+                    // ROOM_MESSAGES_UPDATE를 다시 보내도록 유도해야 함.
+                    // 현재는 MESSAGE_MARKED_AS_NOTICE_SUCCESS 응답을 받은 클라이언트가 스스로 새로고침하도록 유도.
+
+                    // 모든 참여자에게 공지 목록 갱신을 요청 (NoticeFrame용)
+                    List<User> participantsInRoom = chatRoomDAO.getParticipantsInRoom(roomIdForNotice);
+                    for (User participant : participantsInRoom) {
+                        ClientHandler handler = server.getConnectedClients().get(participant.getUserId());
+                        if (handler != null) {
+                            // 클라이언트가 NOTICE_LIST_UPDATE를 받으면, 다시 getNoticeMessages를 호출하도록 유도
+                            handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Notice list needs refresh due to update", null));
+                        }
+                    }
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "메시지 공지 상태 업데이트에 실패했습니다.", null);
+                    sendResponse(response);
+                }
                 break;
 
             case GET_NOTICE_MESSAGES:

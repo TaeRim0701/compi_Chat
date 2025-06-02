@@ -14,7 +14,8 @@ public class ServerResponse implements Serializable {
         NEW_MESSAGE, MESSAGE_READ_CONFIRM,
         NOTICE_LIST_UPDATE, TIMELINE_UPDATE,
         FILE_UPLOAD_SUCCESS, FILE_DOWNLOAD_SUCCESS,
-        SYSTEM_NOTIFICATION // 시스템 알림 (읽지 않은 메시지 등)
+        SYSTEM_NOTIFICATION,
+        MESSAGE_MARKED_AS_NOTICE_SUCCESS // 새로 추가: 메시지 공지 상태 업데이트 성공
     }
 
     private ResponseType type;

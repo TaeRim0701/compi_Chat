@@ -9,11 +9,15 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.AttributeSet; // 추가
+import javax.swing.text.Element; // 추가
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.event.MouseAdapter; // 추가
+import java.awt.event.MouseEvent; // 추가
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -36,9 +40,9 @@ public class ChatRoomDialog extends JDialog {
     private JTextField messageInput;
     private JButton sendButton;
     private JButton fileAttachButton;
-    private JCheckBox noticeCheckBox;
+    // private JCheckBox noticeCheckBox; // 공지 체크박스 제거
 
-    private JLabel roomNameLabel; // 클래스 멤버로 선언
+    private JLabel roomNameLabel;
 
     public ChatRoomDialog(JFrame parent, ChatClient client, ChatRoom room) {
         super(parent, room.getRoomName(), false);
@@ -67,6 +71,61 @@ public class ChatRoomDialog extends JDialog {
                 }
             }
         });
+
+        // 채팅 영역에 우클릭 리스너 추가
+        chatArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) { // 우클릭(플랫폼별 팝업 트리거) 감지
+                    int pos = chatArea.viewToModel(e.getPoint()); // 클릭 위치의 모델 오프셋
+                    HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
+                    Element element = doc.getCharacterElement(pos); // 해당 오프셋의 HTML 요소
+
+                    Integer messageId = null;
+                    Element currentElement = element;
+                    // 클릭된 요소부터 상위 요소로 이동하며 data-message-id 속성 찾기
+                    while (currentElement != null && messageId == null) {
+                        AttributeSet attrs = currentElement.getAttributes();
+                        String msgIdStr = (String) attrs.getAttribute("data-message-id");
+                        if (msgIdStr != null) {
+                            try {
+                                messageId = Integer.parseInt(msgIdStr);
+                            } catch (NumberFormatException ex) {
+                                System.err.println("Invalid message ID in HTML: " + msgIdStr);
+                            }
+                        }
+                        currentElement = currentElement.getParentElement(); // 다음 상위 요소
+                    }
+
+                    if (messageId != null) {
+                        final int finalMessageId = messageId;
+                        JPopupMenu popupMenu = new JPopupMenu();
+                        JMenuItem noticeItem = new JMenuItem("공지");
+                        JMenuItem renotifyItem = new JMenuItem("재알림");
+
+                        noticeItem.addActionListener(ev -> {
+                            // 서버에 공지 메시지 요청 전송
+                            Map<String, Object> data = new HashMap<>();
+                            data.put("messageId", finalMessageId);
+                            data.put("isNotice", true); // 공지로 설정
+                            data.put("roomId", chatRoom.getRoomId()); // 채팅방 ID도 함께 보냄
+                            chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
+                        });
+
+                        renotifyItem.addActionListener(ev -> {
+                            // 재알림 기능은 아직 구현되지 않았음을 알림
+                            JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 기능은 아직 구현되지 않았습니다.", "안내", JOptionPane.INFORMATION_MESSAGE);
+                        });
+
+                        popupMenu.add(noticeItem);
+                        popupMenu.add(renotifyItem);
+                        popupMenu.show(e.getComponent(), e.getX(), e.getY());
+                    } else {
+                        System.out.println("DEBUG: Right-click not on a message with ID.");
+                    }
+                }
+            }
+        });
     }
 
     private void initComponents() {
@@ -74,7 +133,7 @@ public class ChatRoomDialog extends JDialog {
 
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setBorder(new EmptyBorder(5, 10, 5, 10));
-        roomNameLabel = new JLabel("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>"); // 멤버 변수에 할당
+        roomNameLabel = new JLabel("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>");
         topPanel.add(roomNameLabel, BorderLayout.WEST);
 
         JButton menuButton = new JButton("메뉴");
@@ -137,12 +196,12 @@ public class ChatRoomDialog extends JDialog {
         sendButton.addActionListener(e -> sendMessage());
         fileAttachButton = new JButton("파일/사진");
         fileAttachButton.addActionListener(e -> attachFile());
-        noticeCheckBox = new JCheckBox("공지");
+        // noticeCheckBox = new JCheckBox("공지"); // 공지 체크박스 제거
 
         inputPanel.add(fileAttachButton, BorderLayout.WEST);
         inputPanel.add(messageInput, BorderLayout.CENTER);
         inputPanel.add(sendButton, BorderLayout.EAST);
-        inputPanel.add(noticeCheckBox, BorderLayout.SOUTH);
+        // inputPanel.add(noticeCheckBox, BorderLayout.SOUTH); // 공지 체크박스 제거
 
         centerPanel.add(inputPanel, BorderLayout.SOUTH);
 
@@ -154,11 +213,10 @@ public class ChatRoomDialog extends JDialog {
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
     }
 
-    // 새로운 메서드: 채팅방 정보 업데이트
     public void updateChatRoomInfo(ChatRoom updatedRoom) {
-        this.chatRoom = updatedRoom; // 내부 chatRoom 객체 업데이트
-        setTitle(chatRoom.getRoomName()); // 다이얼로그 제목 업데이트
-        roomNameLabel.setText("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>"); // 참여자 수 업데이트
+        this.chatRoom = updatedRoom;
+        setTitle(chatRoom.getRoomName());
+        roomNameLabel.setText("<html><b>" + chatRoom.getRoomName() + "</b> (참여자: " + chatRoom.getParticipants().size() + "명)</html>");
         System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " updated. New participant count: " + chatRoom.getParticipants().size());
     }
 
@@ -169,7 +227,7 @@ public class ChatRoomDialog extends JDialog {
         }
 
         MessageType type = MessageType.TEXT;
-        boolean isNotice = noticeCheckBox.isSelected();
+        // boolean isNotice = noticeCheckBox.isSelected(); // 체크박스 제거로 인한 변경
 
         if (content.startsWith("/")) {
             String[] parts = content.split(" ", 2);
@@ -177,16 +235,19 @@ public class ChatRoomDialog extends JDialog {
             String description = parts.length > 1 ? parts[1] : "";
 
             if (command.equals("/start") || command.equals("/end")) {
+                // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
                 chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
             } else {
-                chatClient.sendMessage(chatRoom.getRoomId(), content, type, isNotice);
+                // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
+                chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
             }
         } else {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, type, isNotice);
+            // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
+            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
         }
 
         messageInput.setText("");
-        noticeCheckBox.setSelected(false);
+        // noticeCheckBox.setSelected(false); // 체크박스 제거로 인한 변경
     }
 
     private void attachFile() {
@@ -268,10 +329,6 @@ public class ChatRoomDialog extends JDialog {
                 outerDivAlign = "text-align: center;";
                 innerBubbleMargin = "margin-left: auto; margin-right: auto;";
                 timestampAndSender = message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm"));
-                // 디버그용 로그 추가 시작
-                System.out.println("DEBUG (Client-ChatRoomDialog): Applying system/command style for message: " + message.getContent());
-                System.out.println("DEBUG (Client-ChatRoomDialog): outerDivAlign: " + outerDivAlign + ", innerBubbleMargin: " + innerBubbleMargin);
-                // 디버그용 로그 추가 끝
             } else if (message.getMessageType() == MessageType.FILE || message.getMessageType() == MessageType.IMAGE) {
                 if (message.getContent() != null && !message.getContent().trim().isEmpty()) {
                     String fileName = new File(message.getContent()).getName();
@@ -289,7 +346,6 @@ public class ChatRoomDialog extends JDialog {
             }
 
             // '읽은 사람' 목록 또는 '미열람자 수' 표시 로직
-            // 시스템 메시지에는 읽음 정보 표시 안 함
             if (message.getMessageType() != MessageType.SYSTEM && message.getReaders() != null) {
                 List<String> readerNicknames = message.getReaders().stream()
                         .filter(reader -> reader.getUserId() != message.getSenderId())
@@ -306,13 +362,14 @@ public class ChatRoomDialog extends JDialog {
             }
 
 
-            // HTML 메시지 구조
+            // HTML 메시지 구조에 data-message-id 속성 추가
             String htmlMessage = String.format(
-                    "<div style='clear: both; margin-bottom: 5px; %s'>" +
+                    "<div data-message-id='%d' style='clear: both; margin-bottom: 5px; %s'>" +
                             "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" +
                             "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" +
                             "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" +
                             "</div></div>",
+                    message.getMessageId(), // messageId를 data-message-id에 전달
                     outerDivAlign,
                     backgroundColor,
                     innerBubbleMargin,

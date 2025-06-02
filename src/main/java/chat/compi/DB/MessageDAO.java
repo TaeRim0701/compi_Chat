@@ -23,6 +23,7 @@ public class MessageDAO {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setInt(1, message.getRoomId());
+            // senderId가 0(시스템 사용자)인 경우에도 문제 없이 저장되도록 함
             pstmt.setInt(2, message.getSenderId());
             pstmt.setString(3, message.getMessageType().name());
             pstmt.setString(4, message.getContent());
@@ -141,14 +142,14 @@ public class MessageDAO {
      * @param roomId 공지 메시지를 조회할 채팅방 ID
      * @return 공지 메시지 리스트
      */
-    public List<Message> getNoticeMessagesInRoom(int roomId) { // 메서드 이름 변경 및 roomId 파라미터 추가
+    public List<Message> getNoticeMessagesInRoom(int roomId) {
         List<Message> notices = new ArrayList<>();
         String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
-                "WHERE m.is_notice = TRUE AND m.room_id = ? ORDER BY m.sent_at DESC"; // room_id 조건 추가
+                "WHERE m.is_notice = TRUE AND m.room_id = ? ORDER BY m.sent_at DESC";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, roomId); // roomId 값 설정
+            pstmt.setInt(1, roomId);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     int messageId = rs.getInt("message_id");
@@ -240,5 +241,24 @@ public class MessageDAO {
             System.err.println("Error getting readers for message " + messageId + ": " + e.getMessage());
         }
         return readers;
+    }
+
+    /**
+     * 특정 메시지의 공지 상태를 업데이트합니다.
+     * @param messageId 메시지 ID
+     * @param isNotice 공지 여부 (true: 공지로 설정, false: 공지 해제)
+     * @return 업데이트 성공 여부
+     */
+    public boolean updateMessageNoticeStatus(int messageId, boolean isNotice) {
+        String sql = "UPDATE messages SET is_notice = ? WHERE message_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setBoolean(1, isNotice);
+            pstmt.setInt(2, messageId);
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("Error updating message notice status for message ID " + messageId + ": " + e.getMessage());
+            return false;
+        }
     }
 }

@@ -273,5 +273,45 @@ public class MessageDAO {
             return false;
         }
     }
+
+    /**
+     * 특정 사용자가 아직 읽지 않은 시스템 메시지 조회
+     * (시스템 메시지는 sender_id가 ChatServer의 systemUserId로 가정)
+     * @param userId 사용자 ID
+     * @param systemUserId ChatServer의 시스템 사용자 ID
+     * @return 미열람 시스템 메시지 리스트
+     */
+    public List<Message> getUnreadSystemMessagesForUser(int userId, int systemUserId) {
+        List<Message> unreadSystemMessages = new ArrayList<>();
+        // m.sender_id = ? (systemUserId) : 시스템이 보낸 메시지
+        // mr.user_id IS NULL : 해당 사용자가 읽지 않은 메시지
+        // mr.message_id IS NULL : 해당 메시지가 message_reads에 전혀 없는 경우 (새로운 메시지)
+        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
+                "FROM messages m " +
+                "JOIN users u ON m.sender_id = u.user_id " +
+                "LEFT JOIN message_reads mr ON m.message_id = mr.message_id AND mr.user_id = ? " + // 해당 사용자가 읽었는지
+                "WHERE m.message_type = 'SYSTEM' AND mr.user_id IS NULL " + // 시스템 메시지이고, 해당 사용자가 읽지 않은 경우
+                "ORDER BY m.sent_at ASC";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, userId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    int messageId = rs.getInt("message_id");
+                    int roomId = rs.getInt("room_id");
+                    int senderId = rs.getInt("sender_id");
+                    String senderNickname = rs.getString("sender_nickname");
+                    MessageType messageType = MessageType.valueOf(rs.getString("message_type"));
+                    String content = rs.getString("content");
+                    LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
+                    boolean isNotice = rs.getBoolean("is_notice");
+                    unreadSystemMessages.add(new Message(messageId, roomId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Error getting unread system messages for user " + userId + ": " + e.getMessage());
+        }
+        return unreadSystemMessages;
+    }
 }
 

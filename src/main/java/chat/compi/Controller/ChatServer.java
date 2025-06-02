@@ -348,20 +348,33 @@ public class ChatServer {
         return allRooms;
     }
 
+    // ChatServer.java
+
     public void sendMessageToUser(int targetUserId, Message message) {
         ClientHandler handler = connectedClients.get(targetUserId);
+
+        // 시스템 메시지도 DB에 저장
+        // message.setRoomId()가 시스템 메시지용 가상의 방 ID (예: 1)를 가지도록 설계되어 있다면 문제 없음
+        Message savedMessage = messageDAO.saveMessage(message); // <-- 시스템 메시지 DB 저장
+        if (savedMessage == null) {
+            System.err.println("Failed to save system notification message to DB.");
+            return;
+        }
+
+        // 시스템 메시지를 보낸 후에는 발신자(시스템 봇)가 읽은 것으로 처리 (선택 사항이지만 일관성을 위해)
+        messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId());
+
+
         if (handler != null) {
             Map<String, Object> data = new HashMap<>();
-            data.put("message", message);
-            data.put("senderId", getSystemUserId()); // 시스템 메시지임을 나타내는 ID
-            // Add unreadRoomId to the data map for SYSTEM_NOTIFICATIONs
-            // The message's roomId should be the unreadRoomId in this context.
-            data.put("unreadRoomId", message.getRoomId()); // <--- ADD THIS LINE
+            data.put("message", savedMessage); // 저장된 메시지 객체 사용
+            data.put("senderId", getSystemUserId());
+            data.put("unreadRoomId", savedMessage.getRoomId()); // 메시지의 roomId를 사용
             handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System Notification", data));
-            System.out.println("Sent system notification to user " + targetUserId + " for room " + message.getRoomId());
+            System.out.println("Sent system notification (real-time) to user " + targetUserId + " for room " + savedMessage.getRoomId());
         } else {
-            System.out.println("User " + targetUserId + " is not connected. Cannot send system notification.");
-            // 선택 사항: 사용자가 오프라인일 경우 알림을 DB에 저장하거나 다른 방식으로 처리할 수 있습니다.
+            System.out.println("User " + targetUserId + " is not connected. System notification saved to DB.");
+            // 오프라인 사용자에게는 실시간으로 보내지 못했지만, DB에 저장되었으므로 나중에 볼 수 있음.
         }
     }
 }

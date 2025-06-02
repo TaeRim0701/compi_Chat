@@ -468,6 +468,18 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
+            case GET_UNREAD_SYSTEM_NOTIFICATIONS:
+                if (this.userId == -1) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot get unread system notifications.", null);
+                    sendResponse(response);
+                    break;
+                }
+                List<Message> unreadSystemMsgs = messageDAO.getUnreadSystemMessagesForUser(this.userId, server.getSystemUserId());
+                responseData.put("messages", unreadSystemMsgs);
+                response = new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "Unread system notifications loaded", responseData);
+                sendResponse(response);
+                break;
+
             default:
                 response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Unknown request type: " + request.getType(), null);
                 sendResponse(response);

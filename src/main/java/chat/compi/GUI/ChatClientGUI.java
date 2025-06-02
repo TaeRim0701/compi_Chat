@@ -95,6 +95,9 @@ public class ChatClientGUI extends JFrame {
         initNoticeFrame();
         initTimelineFrame();
         initUnreadNotificationFrame();
+
+        // 로그인 시 미열람 시스템 알림 메시지 로드 및 표시
+        loadUnreadSystemNotifications();
     }
 
     private void handleMessageReadConfirm(ServerResponse response) {
@@ -120,7 +123,6 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, this::handleSystemNotification);
         chatClient.setResponseListener(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, this::handleRoomMessagesUpdate);
         chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleGeneralSuccessResponse);
-        // 메시지 공지 상태 업데이트 성공 응답 리스너 추가
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_MARKED_AS_NOTICE_SUCCESS, this::handleMessageMarkedAsNoticeSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, this::handleMessageReadConfirm);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, this::handleMessageAlreadyRead);
@@ -370,11 +372,16 @@ public class ChatClientGUI extends JFrame {
             if (dialog != null) {
                 System.out.println("Appending new message to existing dialog for room: " + newMessage.getRoomId());
                 dialog.appendMessageToChatArea(newMessage);
+                // NEW_MESSAGE는 이미 ChatServer에서 markMessageAsRead 처리 후 전송되므로, 여기서는 별도 markMessageAsRead 호출하지 않음
+                // 단, 시스템 메시지가 아니면서 본인이 보낸 메시지가 아닐 경우에만 읽음 처리 확인 (불필요한 DB 접근 방지)
                 if (newMessage.getMessageType() != MessageType.SYSTEM && senderId != currentUser.getUserId()) {
-                    chatClient.markMessageAsRead(newMessage.getMessageId());
+                    // ChatServer에서 이미 처리했으므로 클라이언트에서는 UI 업데이트만 집중
+                    // chatClient.markMessageAsRead(newMessage.getMessageId()); // 이 줄은 제거해도 됨
                 }
             } else {
                 System.out.println("New message received for room " + newMessage.getRoomId() + ", dialog not open. Content: " + newMessage.getContent());
+                // 채팅방이 열려있지 않더라도 메시지를 받으면, 채팅방 목록 갱신을 요청하여
+                // 새로운 메시지/안 읽은 메시지 카운트 등이 반영되도록 합니다.
                 if (newMessage.getMessageType() != MessageType.SYSTEM) {
                     chatClient.getChatRooms();
                 }
@@ -441,11 +448,22 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
+    // 시스템 알림 처리 메서드 (재알림 및 주기적 알림 모두 이리로 옴)
     private void handleSystemNotification(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             Message notificationMessage = (Message) response.getData().get("message");
-            int unreadRoomId = (int) response.getData().get("unreadRoomId");
+            // NullPointerException 해결: unreadRoomId가 null일 수 있으므로 null 체크 후 사용
+            Integer unreadRoomIdInteger = (Integer) response.getData().get("unreadRoomId");
+            int unreadRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : -1; // -1이나 다른 기본값으로 처리
+
             appendSystemNotification(notificationMessage, unreadRoomId);
+
+            // 알림 메시지를 UI에 표시한 후, 읽음 처리 요청
+            // 서버에서 SYSTEM_NOTIFICATION 응답을 보낼 때 message_id를 포함하도록 했으므로
+            // 여기에서 해당 시스템 메시지를 읽음 처리합니다.
+            if (notificationMessage != null && notificationMessage.getMessageId() != 0) {
+                chatClient.markMessageAsRead(notificationMessage.getMessageId());
+            }
         });
     }
 
@@ -547,6 +565,7 @@ public class ChatClientGUI extends JFrame {
         unreadNotificationFrame.add(scrollPane);
     }
 
+    // 시스템 알림 메시지를 화면에 추가 (재알림 및 주기적 알림 모두 이 메서드를 사용)
     private void appendSystemNotification(Message notificationMessage, int unreadRoomId) {
         SwingUtilities.invokeLater(() -> {
             try {
@@ -563,6 +582,16 @@ public class ChatClientGUI extends JFrame {
                 System.err.println("Error appending system notification: " + e.getMessage());
             }
         });
+    }
+
+    // 로그인 시 미열람 시스템 알림을 서버에 요청하는 메서드
+    private void loadUnreadSystemNotifications() {
+        if (chatClient.getCurrentUser() != null) {
+            // 새로운 RequestType.GET_UNREAD_SYSTEM_NOTIFICATIONS 를 사용하여 서버에 요청
+            // 이 요청을 받으면 서버(ClientHandler)는 MessageDAO.getUnreadSystemMessagesForUser 를 호출하여
+            // 미열람 시스템 메시지를 조회하고, SYSTEM_NOTIFICATION 응답으로 클라이언트에게 보냅니다.
+            chatClient.getUnreadSystemNotifications();
+        }
     }
 
     // "설정" (배색) 버튼 토글 로직

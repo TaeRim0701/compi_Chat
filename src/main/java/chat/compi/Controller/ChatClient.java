@@ -233,4 +233,8 @@ public class ChatClient {
         data.put("isAway", isAway);
         sendRequest(new ClientRequest(ClientRequest.RequestType.SET_AWAY_STATUS, data));
     }
+
+    public void getUnreadSystemNotifications() {
+        sendRequest(new ClientRequest(ClientRequest.RequestType.GET_UNREAD_SYSTEM_NOTIFICATIONS, null));
+    }
 }

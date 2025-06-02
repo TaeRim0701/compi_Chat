@@ -80,17 +80,30 @@ public class MessageDAO {
      * @param userId 읽은 사용자 ID
      * @return 성공 여부
      */
-    public boolean markMessageAsRead(int messageId, int userId) {
-        String sql = "INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)"; // IGNORE를 사용하여 중복 방지
+    // MessageDAO.java
+    public int markMessageAsReadStatus(int messageId, int userId) {
+        String sql = "INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, messageId);
             pstmt.setInt(2, userId);
-            return pstmt.executeUpdate() > 0;
+            int affectedRows = pstmt.executeUpdate();
+            if (affectedRows > 0) {
+                return 1; // 성공적으로 삽입됨
+            } else {
+                // affectedRows가 0인 경우: INSERT IGNORE에 의해 중복 키 삽입 무시됨
+                return 0; // 이미 존재하거나 삽입되지 않음
+            }
         } catch (SQLException e) {
             System.err.println("Error marking message as read: " + e.getMessage());
-            return false;
+            e.printStackTrace(); // 여전히 상세 에러 로그를 남깁니다.
+            return -1; // DB 오류 발생
         }
+    }
+
+    // 기존 markMessageAsRead는 이 새로운 메서드를 기반으로 수정하거나 제거
+    public boolean markMessageAsRead(int messageId, int userId) {
+        return markMessageAsReadStatus(messageId, userId) > 0;
     }
 
     /**

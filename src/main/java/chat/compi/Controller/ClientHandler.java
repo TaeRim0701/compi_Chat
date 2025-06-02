@@ -237,16 +237,29 @@ public class ClientHandler implements Runnable {
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
-                if (messageDAO.markMessageAsRead(messageIdToRead, this.userId)) {
-                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", null);
+                int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId); // 새로운 메서드 호출
+
+                if (readStatus == 1) { // 성공적으로 읽음 처리됨
+                    responseData.put("messageId", messageIdToRead);
+                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", responseData);
+                    sendResponse(response);
+
                     Message readMsg = messageDAO.getMessageById(messageIdToRead);
                     if (readMsg != null) {
                         server.updateUnreadCountsForRoom(readMsg.getRoomId());
                     }
-                } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read", null);
+                } else if (readStatus == 0) { // 이미 읽은 메시지 (INSERT IGNORE)
+                    responseData.put("messageId", messageIdToRead);
+                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, true, "Message already marked as read", responseData); // 새로운 응답 타입 사용
+                    sendResponse(response);
+                    // 이 경우 updateUnreadCountsForRoom을 다시 호출할 필요는 없습니다. 이미 읽음 상태가 DB에 반영되어 있으므로.
+                    // 다만, 혹시 모를 UI 불일치를 위해 호출할 수도 있습니다.
+                    // server.updateUnreadCountsForRoom(messageDAO.getMessageById(messageIdToRead).getRoomId());
+                } else { // DB 오류 (-1)
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read (DB error)", null); // 메시지 명확화
+                    sendResponse(response);
+                    System.err.println("Failed to mark message " + messageIdToRead + " as read by user " + this.userId + " due to DB error.");
                 }
-                sendResponse(response);
                 break;
 
             case INVITE_USER_TO_ROOM:

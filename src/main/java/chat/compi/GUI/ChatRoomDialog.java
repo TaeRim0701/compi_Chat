@@ -1,3 +1,4 @@
+// ChatRoomDialog.java
 package chat.compi.GUI;
 
 import chat.compi.Controller.ChatClient;
@@ -9,15 +10,15 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import javax.swing.text.BadLocationException;
-import javax.swing.text.AttributeSet; // 추가
-import javax.swing.text.Element; // 추가
+import javax.swing.text.AttributeSet;
+import javax.swing.text.Element;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.awt.event.MouseAdapter; // 추가
-import java.awt.event.MouseEvent; // 추가
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -40,7 +41,6 @@ public class ChatRoomDialog extends JDialog {
     private JTextField messageInput;
     private JButton sendButton;
     private JButton fileAttachButton;
-    // private JCheckBox noticeCheckBox; // 공지 체크박스 제거
 
     private JLabel roomNameLabel;
 
@@ -72,18 +72,16 @@ public class ChatRoomDialog extends JDialog {
             }
         });
 
-        // 채팅 영역에 우클릭 리스너 추가
         chatArea.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseReleased(MouseEvent e) {
-                if (e.isPopupTrigger()) { // 우클릭(플랫폼별 팝업 트리거) 감지
-                    int pos = chatArea.viewToModel(e.getPoint()); // 클릭 위치의 모델 오프셋
+                if (e.isPopupTrigger()) {
+                    int pos = chatArea.viewToModel(e.getPoint());
                     HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
-                    Element element = doc.getCharacterElement(pos); // 해당 오프셋의 HTML 요소
+                    Element element = doc.getCharacterElement(pos);
 
                     Integer messageId = null;
                     Element currentElement = element;
-                    // 클릭된 요소부터 상위 요소로 이동하며 data-message-id 속성 찾기
                     while (currentElement != null && messageId == null) {
                         AttributeSet attrs = currentElement.getAttributes();
                         String msgIdStr = (String) attrs.getAttribute("data-message-id");
@@ -94,7 +92,7 @@ public class ChatRoomDialog extends JDialog {
                                 System.err.println("Invalid message ID in HTML: " + msgIdStr);
                             }
                         }
-                        currentElement = currentElement.getParentElement(); // 다음 상위 요소
+                        currentElement = currentElement.getParentElement();
                     }
 
                     if (messageId != null) {
@@ -104,16 +102,14 @@ public class ChatRoomDialog extends JDialog {
                         JMenuItem renotifyItem = new JMenuItem("재알림");
 
                         noticeItem.addActionListener(ev -> {
-                            // 서버에 공지 메시지 요청 전송
                             Map<String, Object> data = new HashMap<>();
                             data.put("messageId", finalMessageId);
-                            data.put("isNotice", true); // 공지로 설정
-                            data.put("roomId", chatRoom.getRoomId()); // 채팅방 ID도 함께 보냄
+                            data.put("isNotice", true);
+                            data.put("roomId", chatRoom.getRoomId());
                             chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
                         });
 
                         renotifyItem.addActionListener(ev -> {
-                            // 재알림 기능은 아직 구현되지 않았음을 알림
                             JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 기능은 아직 구현되지 않았습니다.", "안내", JOptionPane.INFORMATION_MESSAGE);
                         });
 
@@ -196,12 +192,10 @@ public class ChatRoomDialog extends JDialog {
         sendButton.addActionListener(e -> sendMessage());
         fileAttachButton = new JButton("파일/사진");
         fileAttachButton.addActionListener(e -> attachFile());
-        // noticeCheckBox = new JCheckBox("공지"); // 공지 체크박스 제거
 
         inputPanel.add(fileAttachButton, BorderLayout.WEST);
         inputPanel.add(messageInput, BorderLayout.CENTER);
         inputPanel.add(sendButton, BorderLayout.EAST);
-        // inputPanel.add(noticeCheckBox, BorderLayout.SOUTH); // 공지 체크박스 제거
 
         centerPanel.add(inputPanel, BorderLayout.SOUTH);
 
@@ -211,6 +205,9 @@ public class ChatRoomDialog extends JDialog {
 
     public void loadMessages() {
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
+        // 채팅방에 들어올 때 (메시지 로드 시) 모든 안 읽은 메시지를 읽음 처리 요청
+        // 서버에서 메시지 목록을 받아올 때, 클라이언트는 각 메시지에 대해 '읽음' 요청을 보냅니다.
+        // 이 요청은 비동기적으로 처리되므로 UI가 멈추지 않습니다.
     }
 
     public void updateChatRoomInfo(ChatRoom updatedRoom) {
@@ -227,7 +224,6 @@ public class ChatRoomDialog extends JDialog {
         }
 
         MessageType type = MessageType.TEXT;
-        // boolean isNotice = noticeCheckBox.isSelected(); // 체크박스 제거로 인한 변경
 
         if (content.startsWith("/")) {
             String[] parts = content.split(" ", 2);
@@ -235,19 +231,15 @@ public class ChatRoomDialog extends JDialog {
             String description = parts.length > 1 ? parts[1] : "";
 
             if (command.equals("/start") || command.equals("/end")) {
-                // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
                 chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
             } else {
-                // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
                 chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
             }
         } else {
-            // 공지는 나중에 우클릭으로 설정하므로, 여기서는 항상 false
             chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
         }
 
         messageInput.setText("");
-        // noticeCheckBox.setSelected(false); // 체크박스 제거로 인한 변경
     }
 
     private void attachFile() {
@@ -269,14 +261,28 @@ public class ChatRoomDialog extends JDialog {
         JOptionPane.showMessageDialog(this, "파일 다운로드 요청됨. 서버 응답을 기다립니다.", "정보", JOptionPane.INFORMATION_MESSAGE);
     }
 
+    // ChatRoomDialog.java - displayMessages 메서드 내
     public void displayMessages(List<Message> messages) {
         try {
             doc.remove(0, doc.getLength());
             if (messages != null) {
                 for (Message message : messages) {
                     appendMessageToChatArea(message);
+
+                    // 메시지 로드 시 읽음 처리 요청:
+                    // 현재 사용자가 보낸 메시지가 아니고, 시스템 메시지가 아니며,
+                    // 그리고 아직 읽지 않은 메시지인 경우에만 읽음 처리 요청
+                    if (message.getSenderId() != currentUser.getUserId() && message.getMessageType() != MessageType.SYSTEM) {
+                        boolean isReadByCurrentUser = message.getReaders() != null &&
+                                message.getReaders().stream().anyMatch(reader -> reader.getUserId() == currentUser.getUserId());
+                        if (!isReadByCurrentUser) {
+                            chatClient.markMessageAsRead(message.getMessageId());
+                        }
+                    }
                 }
             }
+            chatArea.setCaretPosition(doc.getLength()); // 메시지 표시 후 스크롤을 맨 아래로
+
         } catch (BadLocationException e) {
             System.err.println("Error clearing or appending messages: " + e.getMessage());
         }
@@ -348,13 +354,16 @@ public class ChatRoomDialog extends JDialog {
             // '읽은 사람' 목록 또는 '미열람자 수' 표시 로직
             if (message.getMessageType() != MessageType.SYSTEM && message.getReaders() != null) {
                 List<String> readerNicknames = message.getReaders().stream()
-                        .filter(reader -> reader.getUserId() != message.getSenderId())
+                        .filter(reader -> reader.getUserId() != message.getSenderId()) // 메시지 발신자는 '읽은 사람'에서 제외
                         .map(User::getNickname)
                         .collect(Collectors.toList());
 
                 if (!readerNicknames.isEmpty()) {
                     suffix = " <span style='font-size: 0.7em; color: #666;'>읽음: " + String.join(", ", readerNicknames) + "</span>";
                 } else {
+                    // 발신자가 자신의 메시지를 볼 때만 미열람자 수를 표시합니다.
+                    // 수신자는 자신이 메시지를 읽는 순간 미열람자 수가 0으로 갱신되므로,
+                    // 이 조건은 발신자가 보낸 메시지를 다른 사람들이 아직 읽지 않았을 때 유용합니다.
                     if (message.getSenderId() == currentUser.getUserId() && message.getUnreadCount() > 0) {
                         suffix = " <span style='font-size: 0.8em; color: gray;'>(" + message.getUnreadCount() + "명 미열람)</span>";
                     }

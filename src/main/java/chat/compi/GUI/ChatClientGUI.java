@@ -97,7 +97,15 @@ public class ChatClientGUI extends JFrame {
         initUnreadNotificationFrame();
     }
 
+    private void handleMessageReadConfirm(ServerResponse response) {
+        System.out.println("DEBUG: Message read confirmed from server. Message ID: " + response.getData().get("messageId"));
+        // 필요에 따라 UI 업데이트 로직 추가 가능 (현재는 ROOM_MESSAGES_UPDATE로 대체 가능)
+    }
 
+    private void handleMessageAlreadyRead(ServerResponse response) {
+        System.out.println("DEBUG: Message " + response.getData().get("messageId") + " was already read. No action needed.");
+        // 이 경우에는 사용자에게 팝업을 띄우지 않습니다.
+    }
 
     private void setupResponseListeners() {
         chatClient.setResponseListener(ServerResponse.ResponseType.FRIEND_LIST_UPDATE, this::handleFriendListUpdate);
@@ -114,6 +122,8 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleGeneralSuccessResponse);
         // 메시지 공지 상태 업데이트 성공 응답 리스너 추가
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_MARKED_AS_NOTICE_SUCCESS, this::handleMessageMarkedAsNoticeSuccess);
+        chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, this::handleMessageReadConfirm);
+        chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, this::handleMessageAlreadyRead);
     }
 
     private void initComponents() {

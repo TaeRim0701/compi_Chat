@@ -133,19 +133,18 @@ public class MessageDAO {
      * @return 안 읽은 메시지 수
      */
     public int getUnreadMessageCount(int roomId, int userId) {
-        String sql = "SELECT COUNT(DISTINCT m.message_id) FROM messages m " +
-                "LEFT JOIN message_reads mr ON m.message_id = mr.message_id AND mr.user_id = ? " +
-                "WHERE m.room_id = ? AND mr.message_id IS NULL";
+        String sql = "SELECT COUNT(*) FROM messages m LEFT JOIN message_reads mr ON m.message_id = mr.message_id WHERE m.room_id = ? AND mr.user_id IS NULL AND m.sender_id != ?";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, userId);
-            pstmt.setInt(2, roomId);
+            pstmt.setInt(1, roomId);
+            pstmt.setInt(2, userId);
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
                 return rs.getInt(1);
             }
         } catch (SQLException e) {
             System.err.println("Error getting unread message count: " + e.getMessage());
+            e.printStackTrace();
         }
         return 0;
     }
@@ -275,3 +274,4 @@ public class MessageDAO {
         }
     }
 }
+

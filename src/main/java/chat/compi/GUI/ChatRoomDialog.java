@@ -110,7 +110,11 @@ public class ChatRoomDialog extends JDialog {
                         });
 
                         renotifyItem.addActionListener(ev -> {
-                            JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 기능은 아직 구현되지 않았습니다.", "안내", JOptionPane.INFORMATION_MESSAGE);
+                            Map<String, Object> data = new HashMap<>();
+                            data.put("roomId", chatRoom.getRoomId()); // 현재 채팅방 ID 전달
+                            data.put("messageId", finalMessageId); // 재알림을 요청하는 메시지 ID 전달
+                            chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.RESEND_NOTIFICATION, data));
+                            JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 요청을 서버로 보냈습니다.", "재알림", JOptionPane.INFORMATION_MESSAGE);
                         });
 
                         popupMenu.add(noticeItem);

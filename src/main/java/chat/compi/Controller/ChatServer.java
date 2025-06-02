@@ -33,6 +33,7 @@ public class ChatServer {
     private MessageDAO messageDAO;
     private ChatRoomDAO chatRoomDAO;
     private ScheduledExecutorService scheduler;
+    private Map<Integer, ChatRoom> chatRooms;
 
     private static final String SYSTEM_USERNAME = "system_bot";
     private int systemUserId;
@@ -94,6 +95,43 @@ public class ChatServer {
             System.err.println("Server error: " + e.getMessage());
             stop();
         }
+
+        Timer timer = new Timer();
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                // 모든 채팅방을 순회하며 안 읽은 메시지가 있는 사용자에게 알림을 보냅니다.
+                // 이 chatRooms 맵은 ChatServer 클래스에 필드로 선언되어 있지만, 초기화되지 않고 사용되고 있습니다.
+                // 아래 로직이 제대로 동작하려면 chatRooms 필드를 올바르게 초기화해야 합니다.
+                // getAllChatRoomsForUnreadCheck()를 호출하여 현재 활성화된 채팅방 목록을 가져오는 것이 더 안전합니다.
+                List<ChatRoom> allActiveRooms = getAllChatRoomsForUnreadCheck(); // 모든 채팅방을 DB에서 가져옴
+
+                for (ChatRoom room : allActiveRooms) { // allActiveRooms 사용
+                    List<User> participants = chatRoomDAO.getParticipantsInRoom(room.getRoomId()); // 해당 방 참여자 목록 조회
+                    for (User participant : participants) {
+                        int userId = participant.getUserId();
+                        int unreadCount = messageDAO.getUnreadMessageCount(room.getRoomId(), userId); // roomId 사용
+                        if (unreadCount > 0) {
+                            String notificationContent = String.format(
+                                    "채팅방 '%s'에 안 읽은 메시지가 %d개 있습니다.",
+                                    room.getRoomName(), // 채팅방 이름 사용
+                                    unreadCount
+                            );
+                            // Message 객체 생성하여 전달
+                            Message systemNotification = new Message(
+                                    room.getRoomId(), // 해당 채팅방 ID
+                                    getSystemUserId(),
+                                    "시스템",
+                                    MessageType.SYSTEM,
+                                    notificationContent,
+                                    false
+                            );
+                            sendMessageToUser(userId, systemNotification); // Message 객체 전달
+                        }
+                    }
+                }
+            }
+        }, 3600000, 3600000); // 1시간(3600000 밀리초)마다 실행
     }
 
     public void stop() {
@@ -223,7 +261,21 @@ public class ChatServer {
                         boolean isRead = messageDAO.isMessageReadByUser(message.getMessageId(), participant.getUserId());
 
                         if (!isRead) {
-                            sendUnreadNotification(participant.getUserId(), message.getRoomId(), message.getMessageId(), message.getContent());
+                            // 여기에서 Message 객체를 생성하여 sendUnreadNotification에 전달
+                            String notificationContent = String.format(
+                                    "채팅방 '%s'에 읽지 않은 메시지가 있습니다: \"%s\"",
+                                    room.getRoomName(), // 채팅방 이름 추가
+                                    message.getContent()
+                            );
+                            Message systemNotification = new Message(
+                                    message.getRoomId(), // 이 메시지가 속한 채팅방 ID
+                                    this.systemUserId,
+                                    "시스템",
+                                    MessageType.SYSTEM,
+                                    notificationContent,
+                                    false
+                            );
+                            sendUnreadNotification(participant.getUserId(), systemNotification); // Message 객체 전달
                         }
                     }
                 }
@@ -231,17 +283,17 @@ public class ChatServer {
         }
     }
 
-    private void sendUnreadNotification(int targetUserId, int unreadRoomId, int unreadMessageId, String unreadMessageContent) {
+    // sendUnreadNotification 메서드 시그니처 및 내부 로직 변경
+    private void sendUnreadNotification(int targetUserId, Message systemMessage) { // String -> Message 변경
         ClientHandler handler = connectedClients.get(targetUserId);
         if (handler != null) {
-            int systemRoomId = 1;
-            String notificationContent = "당신이 참여한 채팅방(ID: " + unreadRoomId + ")에 읽지 않은 메시지가 있습니다: \"" + unreadMessageContent + "\"";
-            Message systemMessage = new Message(systemRoomId, this.systemUserId, "시스템", MessageType.SYSTEM, notificationContent, false);
-
             Map<String, Object> data = new HashMap<>();
             data.put("message", systemMessage);
-            data.put("unreadRoomId", unreadRoomId);
+            data.put("unreadRoomId", systemMessage.getRoomId()); // 알림 메시지에서 roomId를 가져와 전달
             handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "Unread message notification", data));
+            System.out.println("Sent system notification to user " + targetUserId + " for room " + systemMessage.getRoomId());
+        } else {
+            System.out.println("User " + targetUserId + " is not connected. Cannot send system notification.");
         }
     }
 
@@ -294,5 +346,22 @@ public class ChatServer {
             System.err.println("Error getting all chat rooms for unread check: " + e.getMessage());
         }
         return allRooms;
+    }
+
+    public void sendMessageToUser(int targetUserId, Message message) {
+        ClientHandler handler = connectedClients.get(targetUserId);
+        if (handler != null) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("message", message);
+            data.put("senderId", getSystemUserId()); // 시스템 메시지임을 나타내는 ID
+            // Add unreadRoomId to the data map for SYSTEM_NOTIFICATIONs
+            // The message's roomId should be the unreadRoomId in this context.
+            data.put("unreadRoomId", message.getRoomId()); // <--- ADD THIS LINE
+            handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System Notification", data));
+            System.out.println("Sent system notification to user " + targetUserId + " for room " + message.getRoomId());
+        } else {
+            System.out.println("User " + targetUserId + " is not connected. Cannot send system notification.");
+            // 선택 사항: 사용자가 오프라인일 경우 알림을 DB에 저장하거나 다른 방식으로 처리할 수 있습니다.
+        }
     }
 }

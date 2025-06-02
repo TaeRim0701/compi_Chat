@@ -237,28 +237,18 @@ public class ClientHandler implements Runnable {
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
-                int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId); // 새로운 메서드 호출
-
-                if (readStatus == 1) { // 성공적으로 읽음 처리됨
+                boolean success = messageDAO.markMessageAsRead(messageIdToRead, this.userId);
+                if (success) {
                     responseData.put("messageId", messageIdToRead);
                     response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", responseData);
                     sendResponse(response);
-
                     Message readMsg = messageDAO.getMessageById(messageIdToRead);
                     if (readMsg != null) {
                         server.updateUnreadCountsForRoom(readMsg.getRoomId());
                     }
-                } else if (readStatus == 0) { // 이미 읽은 메시지 (INSERT IGNORE)
-                    responseData.put("messageId", messageIdToRead);
-                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, true, "Message already marked as read", responseData); // 새로운 응답 타입 사용
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read", null);
                     sendResponse(response);
-                    // 이 경우 updateUnreadCountsForRoom을 다시 호출할 필요는 없습니다. 이미 읽음 상태가 DB에 반영되어 있으므로.
-                    // 다만, 혹시 모를 UI 불일치를 위해 호출할 수도 있습니다.
-                    // server.updateUnreadCountsForRoom(messageDAO.getMessageById(messageIdToRead).getRoomId());
-                } else { // DB 오류 (-1)
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read (DB error)", null); // 메시지 명확화
-                    sendResponse(response);
-                    System.err.println("Failed to mark message " + messageIdToRead + " as read by user " + this.userId + " due to DB error.");
                 }
                 break;
 
@@ -417,8 +407,7 @@ public class ClientHandler implements Runnable {
                 }
 
                 int roomIdToLeave = (int) request.getData().get("roomId");
-                boolean success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId);
-
+                success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId); // 'boolean' 키워드 제거
                 if (success) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);
                     sendResponse(response);
@@ -428,6 +417,54 @@ public class ClientHandler implements Runnable {
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null);
                 }
+                sendResponse(response);
+                break;
+
+            case RESEND_NOTIFICATION:
+                int renotifyRoomId = (int) request.getData().get("roomId");
+                int renotifyMessageId = (int) request.getData().get("messageId"); // 재알림 요청 메시지 ID
+
+                // 재알림을 요청한 메시지의 정보를 가져옵니다. (재알림 내용에 포함하기 위함)
+                Message originalMessage = messageDAO.getMessageById(renotifyMessageId);
+
+                if (originalMessage == null) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "원본 메시지를 찾을 수 없습니다.", null);
+                    sendResponse(response);
+                    break;
+                }
+
+                // 해당 채팅방의 모든 참여자를 가져옵니다.
+                List<User> roomParticipants = chatRoomDAO.getParticipantsInRoom(renotifyRoomId);
+
+                // 각 참여자에 대해 미열람 상태 확인 및 알림 전송
+                for (User participant : roomParticipants) {
+                    // 재알림 요청을 보낸 본인에게는 알림을 보내지 않습니다.
+                    if (participant.getUserId() == this.userId) {
+                        continue;
+                    }
+
+                    // 해당 메시지를 읽지 않은 사용자에게만 알림을 보냅니다.
+                    boolean isRead = messageDAO.isMessageReadByUser(originalMessage.getMessageId(), participant.getUserId());
+                    if (!isRead) {
+                        // 해당 채팅방의 총 미열람 메시지 수를 조회하여 알림 내용에 포함
+                        int totalUnreadCount = messageDAO.getUnreadMessageCount(renotifyRoomId, participant.getUserId());
+
+                        String notificationContent = String.format(
+                                "'%s' 채팅방에 읽지 않은 메시지가 %d개 있습니다. (원본 메시지: \"%s\")",
+                                chatRoomDAO.getChatRoomById(renotifyRoomId).getRoomName(), // 채팅방 이름
+                                totalUnreadCount,
+                                originalMessage.getContent() // 원본 메시지 내용
+                        );
+
+                        // 시스템 메시지 생성
+                        // roomId는 재알림을 보낼 채팅방의 roomId를 사용 (ChatRoomDialog에서 이 정보로 어떤 방의 알림인지 표시 가능)
+                        Message systemNotification = new Message(renotifyRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, notificationContent, false);
+
+                        // 수정: String 대신 Message 객체 전달
+                        server.sendMessageToUser(participant.getUserId(), systemNotification);
+                    }
+                }
+                response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "재알림 요청을 처리했습니다.", null);
                 sendResponse(response);
                 break;
 

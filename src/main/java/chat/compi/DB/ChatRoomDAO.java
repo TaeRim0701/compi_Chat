@@ -171,15 +171,15 @@ public class ChatRoomDAO {
      */
     public List<ChatRoom> getChatRoomsByUserId(int userId) {
         List<ChatRoom> chatRooms = new ArrayList<>();
-        // userId 유효성 검사 추가
-        if (userId <= 0) { // 유효한 user_id는 보통 1부터 시작합니다.
+        if (userId <= 0) {
             System.err.println("Invalid userId provided to getChatRoomsByUserId: " + userId + ". Returning empty list.");
-            return chatRooms; // 유효하지 않은 userId인 경우 빈 리스트 반환
+            return chatRooms;
         }
 
+        // ORDER BY cr.created_at ASC 부분을 ORDER BY cr.last_message_at DESC로 변경
         String sql = "SELECT cr.room_id, cr.room_name, cr.created_at, cr.is_group_chat " +
                 "FROM chat_rooms cr JOIN room_participants rp ON cr.room_id = rp.room_id " +
-                "WHERE rp.user_id = ? ORDER BY cr.created_at ASC";
+                "WHERE rp.user_id = ? ORDER BY cr.last_message_at DESC"; // 수정됨
 
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -191,10 +191,8 @@ public class ChatRoomDAO {
                     LocalDateTime createdAt = rs.getTimestamp("created_at").toLocalDateTime();
                     boolean isGroupChat = rs.getBoolean("is_group_chat");
 
-                    // getParticipantsInRoom 호출 시에도 새로운 Connection을 얻도록 DatabaseConnection이 변경되었으므로 문제 없음.
                     List<User> participants = getParticipantsInRoom(roomId);
 
-                    // 1:1 채팅방 이름 재구성 로직
                     if (!isGroupChat) {
                         if (participants.size() == 2) {
                             User user1 = participants.get(0);
@@ -207,7 +205,7 @@ public class ChatRoomDAO {
                             }
                             roomName = otherUserName + "님과의 1:1 대화";
                         } else {
-                            roomName = "알 수 없는 1:1 대화방 (참여자 수 불일치)"; // 예외 상황 메시지
+                            roomName = "알 수 없는 1:1 대화방 (참여자 수 불일치)";
                         }
                     }
 

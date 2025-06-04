@@ -372,19 +372,12 @@ public class ChatClientGUI extends JFrame {
             if (dialog != null) {
                 System.out.println("Appending new message to existing dialog for room: " + newMessage.getRoomId());
                 dialog.appendMessageToChatArea(newMessage);
-                // NEW_MESSAGE는 이미 ChatServer에서 markMessageAsRead 처리 후 전송되므로, 여기서는 별도 markMessageAsRead 호출하지 않음
-                // 단, 시스템 메시지가 아니면서 본인이 보낸 메시지가 아닐 경우에만 읽음 처리 확인 (불필요한 DB 접근 방지)
-                if (newMessage.getMessageType() != MessageType.SYSTEM && senderId != currentUser.getUserId()) {
-                    // ChatServer에서 이미 처리했으므로 클라이언트에서는 UI 업데이트만 집중
-                    // chatClient.markMessageAsRead(newMessage.getMessageId()); // 이 줄은 제거해도 됨
-                }
             } else {
                 System.out.println("New message received for room " + newMessage.getRoomId() + ", dialog not open. Content: " + newMessage.getContent());
-                // 채팅방이 열려있지 않더라도 메시지를 받으면, 채팅방 목록 갱신을 요청하여
-                // 새로운 메시지/안 읽은 메시지 카운트 등이 반영되도록 합니다.
-                if (newMessage.getMessageType() != MessageType.SYSTEM) {
-                    chatClient.getChatRooms();
-                }
+            }
+            // 새로운 메시지가 오면 채팅방 목록을 새로고침하여 최신 메시지 순으로 정렬되도록 요청
+            if (newMessage.getMessageType() != MessageType.SYSTEM) { // 시스템 메시지는 채팅방 순서에 영향을 주지 않도록
+                chatClient.getChatRooms(); // 이 부분을 추가하여 채팅방 목록을 갱신 요청합니다.
             }
         });
     }

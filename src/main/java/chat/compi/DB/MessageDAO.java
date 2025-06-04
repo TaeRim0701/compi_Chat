@@ -20,27 +20,44 @@ public class MessageDAO {
      */
     public Message saveMessage(Message message) {
         String sql = "INSERT INTO messages (room_id, sender_id, message_type, content, is_notice) VALUES (?, ?, ?, ?, ?)";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            pstmt.setInt(1, message.getRoomId());
-            // senderId가 0(시스템 사용자)인 경우에도 문제 없이 저장되도록 함
-            pstmt.setInt(2, message.getSenderId());
-            pstmt.setString(3, message.getMessageType().name());
-            pstmt.setString(4, message.getContent());
-            pstmt.setBoolean(5, message.isNotice());
-            int affectedRows = pstmt.executeUpdate();
+        String updateRoomLastMessageSql = "UPDATE chat_rooms SET last_message_at = ? WHERE room_id = ?"; // 추가
 
-            if (affectedRows > 0) {
-                ResultSet rs = pstmt.getGeneratedKeys();
-                if (rs.next()) {
-                    message.setMessageId(rs.getInt(1)); // 생성된 메시지 ID 설정
-                    return message;
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false); // 트랜잭션 시작
+
+            try (PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                pstmt.setInt(1, message.getRoomId());
+                pstmt.setInt(2, message.getSenderId());
+                pstmt.setString(3, message.getMessageType().name());
+                pstmt.setString(4, message.getContent());
+                pstmt.setBoolean(5, message.isNotice());
+                int affectedRows = pstmt.executeUpdate();
+
+                if (affectedRows > 0) {
+                    ResultSet rs = pstmt.getGeneratedKeys();
+                    if (rs.next()) {
+                        message.setMessageId(rs.getInt(1)); // 생성된 메시지 ID 설정
+                    }
+                } else {
+                    conn.rollback();
+                    return null;
                 }
             }
+
+            // chat_rooms 테이블의 last_message_at 업데이트
+            try (PreparedStatement updatePstmt = conn.prepareStatement(updateRoomLastMessageSql)) {
+                updatePstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now())); // 현재 시간으로 업데이트
+                updatePstmt.setInt(2, message.getRoomId());
+                updatePstmt.executeUpdate();
+            }
+
+            conn.commit(); // 모든 작업 성공 시 커밋
+            return message;
         } catch (SQLException e) {
-            System.err.println("Error saving message: " + e.getMessage());
+            System.err.println("Error saving message and updating chat room last_message_at: " + e.getMessage());
+            e.printStackTrace();
+            return null;
         }
-        return null;
     }
 
     /**
@@ -314,4 +331,3 @@ public class MessageDAO {
         return unreadSystemMessages;
     }
 }
-

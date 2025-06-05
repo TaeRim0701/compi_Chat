@@ -300,22 +300,23 @@ public class MessageDAO {
      */
     public List<Message> getUnreadSystemMessagesForUser(int userId, int systemUserId) {
         List<Message> unreadSystemMessages = new ArrayList<>();
-        // m.sender_id = ? (systemUserId) : 시스템이 보낸 메시지
-        // mr.user_id IS NULL : 해당 사용자가 읽지 않은 메시지
-        // mr.message_id IS NULL : 해당 메시지가 message_reads에 전혀 없는 경우 (새로운 메시지)
+        // 이 쿼리는 이제 시스템 채팅방 (systemUserId와 userId간의 1:1 채팅방)의 메시지를 가져오는 데 사용될 수 있습니다.
+        // 하지만 편의상 여전히 sender_id가 systemUserId인 메시지를 가져오도록 유지합니다.
+        // 즉, '미열람 알림 프레임'을 채우는 용도로 사용되거나, 클라이언트가 로그인 시 초기 시스템 채팅방 메시지를 로드하는 용도로 사용될 수 있습니다.
         String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
                 "FROM messages m " +
                 "JOIN users u ON m.sender_id = u.user_id " +
                 "LEFT JOIN message_reads mr ON m.message_id = mr.message_id AND mr.user_id = ? " + // 해당 사용자가 읽었는지
-                "WHERE m.message_type = 'SYSTEM' AND mr.user_id IS NULL " + // 시스템 메시지이고, 해당 사용자가 읽지 않은 경우
+                "WHERE m.message_type = 'SYSTEM' AND mr.user_id IS NULL AND m.sender_id = ? " + // 시스템 메시지이고, 해당 사용자가 읽지 않은 경우, 시스템 봇이 보낸 메시지
                 "ORDER BY m.sent_at ASC";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, userId);
+            pstmt.setInt(2, systemUserId); // 시스템 봇의 ID
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     int messageId = rs.getInt("message_id");
-                    int roomId = rs.getInt("room_id");
+                    int roomId = rs.getInt("room_id"); // 이 roomId는 시스템 메시지가 저장된 실제 채팅방 ID
                     int senderId = rs.getInt("sender_id");
                     String senderNickname = rs.getString("sender_nickname");
                     MessageType messageType = MessageType.valueOf(rs.getString("message_type"));

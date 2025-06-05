@@ -1,5 +1,5 @@
+// ChatRoomDAO.java
 package chat.compi.DB;
-
 
 import chat.compi.Entity.ChatRoom;
 import chat.compi.Entity.User;
@@ -257,7 +257,12 @@ public class ChatRoomDAO {
             pstmt.setInt(1, roomId);
             pstmt.setInt(2, userId);
             return pstmt.executeUpdate() > 0;
-        } catch (SQLException e) {
+        }
+        catch (SQLIntegrityConstraintViolationException e) {
+            System.err.println("Attempted to invite user " + userId + " to room " + roomId + " but they are already there or room does not exist.");
+            return false;
+        }
+        catch (SQLException e) {
             System.err.println("Error inviting user to room: " + e.getMessage());
             return false;
         }
@@ -333,5 +338,45 @@ public class ChatRoomDAO {
             System.err.println("Error leaving chat room: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 사용자별 시스템 채팅방을 조회하거나 생성합니다.
+     * 이 채팅방은 해당 사용자와 시스템 봇 간의 1:1 채팅방입니다.
+     * @param userId 사용자 ID
+     * @param systemUserId 시스템 봇 사용자 ID
+     * @return 시스템 채팅방 객체
+     */
+    public ChatRoom getOrCreateSystemChatRoomForUser(int userId, int systemUserId) {
+        // 시스템 봇과 사용자 간의 기존 1:1 채팅방을 찾습니다.
+        ChatRoom existingRoom = getExistingPrivateChatRoom(userId, systemUserId);
+        if (existingRoom != null) {
+            return existingRoom;
+        }
+
+        // 없다면 새로 생성합니다.
+        UserDAO userDAO = new UserDAO();
+        User user = userDAO.getUserByUserId(userId);
+        User systemUser = userDAO.getUserByUserId(systemUserId);
+
+        String roomName = "";
+        if (user != null && systemUser != null) {
+            roomName = "시스템 메시지 for " + user.getNickname();
+        } else {
+            roomName = "시스템 메시지 (ID: " + userId + ")";
+        }
+
+        List<Integer> participants = new ArrayList<>();
+        participants.add(userId);
+        participants.add(systemUserId);
+
+        // createChatRoom 메서드를 사용하여 1:1 채팅방 생성 (isGroupChat = false)
+        ChatRoom newRoom = createChatRoom(roomName, false, systemUserId, participants); // 시스템 봇이 생성자로
+        if (newRoom != null) {
+            System.out.println("Created system chat room for user " + userId + " with room ID: " + newRoom.getRoomId());
+        } else {
+            System.err.println("Failed to create system chat room for user " + userId);
+        }
+        return newRoom;
     }
 }

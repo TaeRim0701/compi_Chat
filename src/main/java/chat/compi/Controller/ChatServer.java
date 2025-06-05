@@ -1,4 +1,4 @@
-// ChatServer.java (이전 답변에서 수정된 내용과 동일, 추가 변경 없음)
+// ChatServer.java
 package chat.compi.Controller;
 
 import chat.compi.DB.DatabaseConnection;
@@ -34,7 +34,7 @@ public class ChatServer {
     private MessageDAO messageDAO;
     private ChatRoomDAO chatRoomDAO;
     private ScheduledExecutorService scheduler;
-    private Map<Integer, ChatRoom> chatRooms;
+    private Map<Integer, ChatRoom> chatRooms; // 이 필드는 현재 사용되지 않는 것으로 보입니다. 삭제해도 무방합니다.
 
     private static final String SYSTEM_USERNAME = "system_bot";
     private int systemUserId;
@@ -78,11 +78,30 @@ public class ChatServer {
         return systemUserId;
     }
 
+    // 새롭게 추가된 메서드: 사용자의 시스템 채팅방을 확보
+    public ChatRoom ensureUserSystemChatRoom(int userId) {
+        if (userId == systemUserId) { // 시스템 유저 자신은 시스템 채팅방을 가질 필요 없음
+            return null;
+        }
+        return chatRoomDAO.getOrCreateSystemChatRoomForUser(userId, systemUserId);
+    }
+
     public void start() {
         try {
             serverSocket = new ServerSocket(PORT);
             System.out.println("Chat Server started on port " + PORT);
 
+            // 서버 시작 시 모든 기존 사용자에게 시스템 채팅방이 있는지 확인 및 생성
+            System.out.println("Ensuring system chat rooms for all existing users...");
+            List<User> allUsers = userDAO.getAllUsers();
+            for (User user : allUsers) {
+                if (user.getUserId() != systemUserId) {
+                    ensureUserSystemChatRoom(user.getUserId());
+                }
+            }
+            System.out.println("System chat room setup complete for existing users.");
+
+            // 주기적인 안 읽은 메시지 확인 (이전 로직과 동일)
             scheduler.scheduleAtFixedRate(this::checkUnreadMessages, 5, 5, TimeUnit.MINUTES);
 
             Timer timer = new Timer();
@@ -105,8 +124,11 @@ public class ChatServer {
                                         room.getRoomName(),
                                         unreadCount
                                 );
+                                // 이 부분은 이제 sendMessageToUser가 시스템 채팅방으로 보내도록 변경되므로,
+                                // 별도의 시스템 채팅방 메시지로 처리될 것임
+                                // 기존 sendMessageToUser 호출은 그대로 유지하되, 내부 로직이 시스템 채팅방을 찾도록 변경됨
                                 Message systemNotification = new Message(
-                                        room.getRoomId(),
+                                        room.getRoomId(), // 이 roomId는 원본 채팅방 ID이지만, sendMessageToUser 내부에서 시스템 채팅방 ID로 대체될 것임
                                         getSystemUserId(),
                                         "시스템",
                                         MessageType.SYSTEM,
@@ -152,6 +174,7 @@ public class ChatServer {
         User user = userDAO.getUserByUserId(userId);
         if (user != null) {
             notifyFriendStatusChange(user);
+            ensureUserSystemChatRoom(userId); // 로그인 시 시스템 채팅방 확인 및 생성
         }
     }
 
@@ -198,6 +221,9 @@ public class ChatServer {
 
         if (message.getMessageType() != MessageType.SYSTEM && senderUserId != -1) {
             messageDAO.markMessageAsRead(savedMessage.getMessageId(), senderUserId);
+        } else if (message.getMessageType() == MessageType.SYSTEM && senderUserId == getSystemUserId()) {
+            // 시스템 메시지의 경우, 시스템 봇 자신이 메시지를 보낸 것으로 간주하여 읽음 처리 (DB에 저장 시)
+            messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId());
         }
 
         List<User> readers = messageDAO.getReadersForMessage(savedMessage.getMessageId());
@@ -213,6 +239,11 @@ public class ChatServer {
                 Map<String, Object> data = new HashMap<>();
                 data.put("message", savedMessage);
                 data.put("senderId", senderUserId);
+                // 시스템 메시지는 해당 채팅방의 ID를 그대로 사용하도록 함.
+                // ChatClientGUI에서 SYSTEM_NOTIFICATION 처리 시 이 roomId를 기반으로 해당 채팅방 다이얼로그를 열 것임.
+                if (savedMessage.getMessageType() == MessageType.SYSTEM) {
+                    data.put("unreadRoomId", savedMessage.getRoomId()); // 시스템 메시지일 경우, 해당 채팅방 ID를 unreadRoomId로 전달
+                }
                 handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NEW_MESSAGE, true, "New message", data));
             }
         }
@@ -263,33 +294,25 @@ public class ChatServer {
                                 message.getSenderNickname(),
                                 message.getContent()
                         );
+                        // 주기적인 미열람 알림은 해당 사용자의 시스템 채팅방으로 보내도록 수정
                         Message systemNotification = new Message(
-                                message.getRoomId(),
+                                room.getRoomId(), // 이 roomId는 원본 채팅방 ID로 전달. sendMessageToUser에서 시스템 채팅방 ID로 대체됨
                                 this.systemUserId,
                                 "시스템",
                                 MessageType.SYSTEM,
                                 notificationContent,
                                 false
                         );
-                        sendMessageToUser(participant.getUserId(), systemNotification);
+                        sendMessageToUser(participant.getUserId(), systemNotification); //
                     }
                 }
             }
         }
     }
 
-    private void sendUnreadNotification(int targetUserId, Message systemMessage) {
-        ClientHandler handler = connectedClients.get(targetUserId);
-        if (handler != null) {
-            Map<String, Object> data = new HashMap<>();
-            data.put("message", systemMessage);
-            data.put("unreadRoomId", systemMessage.getRoomId());
-            handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "Unread message notification", data));
-            System.out.println("Sent system notification to user " + targetUserId + " for room " + systemMessage.getRoomId());
-        } else {
-            System.out.println("User " + targetUserId + " is not connected. Cannot send system notification.");
-        }
-    }
+    // 이 메서드는 이제 사용되지 않거나 sendMessageToUser로 통합될 수 있습니다.
+    // 기존 sendUnreadNotification 로직을 sendMessageToUser에 통합하여 더 일반적인 메시지 전송 처리로 만듭니다.
+    // private void sendUnreadNotification(int targetUserId, Message systemMessage) { ... }
 
     public void updateUnreadCountsForRoom(int roomId) {
         List<User> participants = chatRoomDAO.getParticipantsInRoom(roomId);
@@ -342,26 +365,43 @@ public class ChatServer {
         return allRooms;
     }
 
+    // sendMessageToUser 메서드 수정: 시스템 메시지인 경우 대상 사용자의 시스템 채팅방으로 보내도록
     public void sendMessageToUser(int targetUserId, Message message) {
         ClientHandler handler = connectedClients.get(targetUserId);
+
+        // 메시지가 시스템 메시지인 경우, 특정 사용자의 시스템 채팅방 ID를 찾아 설정
+        if (message.getMessageType() == MessageType.SYSTEM) {
+            ChatRoom systemChatRoom = ensureUserSystemChatRoom(targetUserId); // 시스템 채팅방 확보
+            if (systemChatRoom == null) {
+                System.err.println("Failed to get or create system chat room for user " + targetUserId + ". Cannot send system message.");
+                return;
+            }
+            message.setRoomId(systemChatRoom.getRoomId()); // 메시지의 roomId를 시스템 채팅방 ID로 설정
+        }
 
         // 메시지를 먼저 DB에 저장하고, 저장된 Message 객체를 사용합니다.
         Message savedMessage = messageDAO.saveMessage(message);
         if (savedMessage == null) {
-            System.err.println("Failed to save system notification message to DB. Not sending notification to client " + targetUserId);
+            System.err.println("Failed to save message to DB. Not sending notification to client " + targetUserId);
             return; // DB 저장 실패 시 클라이언트에게 보내지 않고 종료
         }
 
-        // 시스템 메시지는 발신자가 시스템이므로, 시스템이 보낸 메시지는 시스템 ID로 읽음 처리합니다.
-        // 이는 시스템 알림이 DB에 저장되자마자 시스템 스스로 '읽었다'고 기록하는 것이므로,
-        // 클라이언트가 이 알림을 받아볼 때 '안 읽음' 상태로 인지하게 됩니다.
-        messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId()); // 시스템 메시지 발신자(시스템 유저)가 읽음 처리
+        // 시스템 메시지의 경우, 시스템 봇 자신이 보낸 메시지로 간주하여 읽음 처리
+        if (message.getMessageType() == MessageType.SYSTEM) {
+            messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId()); // 시스템 메시지 발신자(시스템 유저)가 읽음 처리
+        }
+
 
         if (handler != null) {
             Map<String, Object> data = new HashMap<>();
             data.put("message", savedMessage); // 저장된 메시지 객체를 전달
-            data.put("senderId", getSystemUserId()); // 시스템 메시지의 발신자는 시스템 유저
-            data.put("unreadRoomId", savedMessage.getRoomId()); //
+            data.put("senderId", savedMessage.getSenderId()); // 메시지의 실제 발신자 ID (시스템봇이 보냈으면 시스템봇 ID)
+
+            // 시스템 메시지인 경우 unreadRoomId를 해당 시스템 채팅방 ID로 설정하여 클라이언트에 전송
+            if (savedMessage.getMessageType() == MessageType.SYSTEM) {
+                data.put("unreadRoomId", savedMessage.getRoomId());
+            }
+
             handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System Notification", data));
             System.out.println("Sent system notification (real-time) to user " + targetUserId + " for room " + savedMessage.getRoomId());
         } else {

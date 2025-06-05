@@ -87,6 +87,13 @@ public class ClientHandler implements Runnable {
                     sendResponse(response);
                     sendFriendList();
                     sendChatRoomList();
+                    // 로그인 성공 시 시스템 채팅방 생성 및 클라이언트에 알림
+                    ChatRoom systemChatRoom = server.ensureUserSystemChatRoom(this.userId);
+                    if (systemChatRoom != null) {
+                        Map<String, Object> systemChatData = new HashMap<>();
+                        systemChatData.put("chatRooms", chatRoomDAO.getChatRoomsByUserId(this.userId)); // 전체 채팅방 목록을 다시 보내어 시스템 채팅방이 추가되게 함
+                        sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, true, "System chat room added", systemChatData));
+                    }
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Invalid username or password", null);
                     sendResponse(response);
@@ -99,6 +106,11 @@ public class ClientHandler implements Runnable {
                 String regNickname = (String) request.getData().get("nickname");
                 if (userDAO.registerUser(regUsername, regPassword, regNickname)) {
                     response = new ServerResponse(ServerResponse.ResponseType.REGISTER_SUCCESS, true, "Registration successful", null);
+                    // 회원가입 성공 후, 해당 사용자의 시스템 채팅방을 생성 (로그인 시에도 되지만, 혹시 모를 경우 대비)
+                    User newUser = userDAO.getUserByUsername(regUsername);
+                    if (newUser != null) {
+                        server.ensureUserSystemChatRoom(newUser.getUserId());
+                    }
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Registration failed (username might exist)", null);
                 }
@@ -271,30 +283,30 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-            case ADD_TIMELINE_EVENT: //
-                int timelineRoomId = (int) request.getData().get("roomId"); //
-                String command = (String) request.getData().get("command"); //
-                String description = (String) request.getData().get("description"); //
-                String eventType = (String) request.getData().get("eventType"); //
-                String eventName = (String) request.getData().get("eventName"); //
+            case ADD_TIMELINE_EVENT:
+                int timelineRoomId = (int) request.getData().get("roomId");
+                String command = (String) request.getData().get("command");
+                String description = (String) request.getData().get("description");
+                String eventType = (String) request.getData().get("eventType");
+                String eventName = (String) request.getData().get("eventName");
 
-                if (timelineDAO.saveTimelineEvent(timelineRoomId, this.userId, command, description, eventType, eventName)) { //
-                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Timeline event added successfully", null); //
+                if (timelineDAO.saveTimelineEvent(timelineRoomId, this.userId, command, description, eventType, eventName)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Timeline event added successfully", null);
                     // 타임라인 이벤트 추가 후, 해당 채팅방의 타임라인을 새로고침하도록 클라이언트에게 알림
-                    List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(timelineRoomId); //
-                    Map<String, Object> timelineData = new HashMap<>(); //
-                    timelineData.put("roomId", timelineRoomId); //
-                    timelineData.put("timelineEvents", updatedTimelineEvents); //
-                    sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated", timelineData)); //
+                    List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(timelineRoomId);
+                    Map<String, Object> timelineData = new HashMap<>();
+                    timelineData.put("roomId", timelineRoomId);
+                    timelineData.put("timelineEvents", updatedTimelineEvents);
+                    sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated", timelineData));
                 } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to add timeline event", null); //
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to add timeline event", null);
                 }
-                sendResponse(response); //
+                sendResponse(response);
                 break;
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
-                int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId); // 새로운 반환 값 사용
+                int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId);
 
                 if (readStatus == 1) { // 성공적으로 읽음 처리된 경우
                     responseData.put("messageId", messageIdToRead);
@@ -444,25 +456,25 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-            case LEAVE_CHAT_ROOM: //
-                if (this.userId == -1) { //
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot leave chat room.", null); //
-                    sendResponse(response); //
-                    break; //
+            case LEAVE_CHAT_ROOM:
+                if (this.userId == -1) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot leave chat room.", null);
+                    sendResponse(response);
+                    break;
                 }
 
-                int roomIdToLeave = (int) request.getData().get("roomId"); //
-                success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId); //
-                if (success) { //
-                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null); //
-                    sendResponse(response); //
+                int roomIdToLeave = (int) request.getData().get("roomId");
+                success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId);
+                if (success) {
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);
+                    sendResponse(response);
 
-                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave); //
-                    sendChatRoomList(); //
+                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave);
+                    sendChatRoomList();
                 } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null); //
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null);
                 }
-                sendResponse(response); //
+                sendResponse(response);
                 break;
 
             case RESEND_NOTIFICATION:
@@ -476,19 +488,27 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                Message senderConfirmationMessage = new Message(
-                        renotifyRoomId,
-                        server.getSystemUserId(),
-                        "시스템",
-                        MessageType.SYSTEM,
-                        "재알림이 발송됐습니다.",
-                        false
-                );
-                server.sendMessageToUser(this.userId, senderConfirmationMessage);
+                // 1. 재알림을 요청한 사용자에게는 "재알림이 발송됐습니다." 메시지를 시스템 채팅방으로 보냄
+                User senderUser = userDAO.getUserByUserId(this.userId);
+                if (senderUser != null) {
+                    String senderConfirmContent = "재알림이 발송됐습니다: 원본 메시지 (\"" + originalMessage.getContent() + "\")";
+                    Message senderConfirmationMessage = new Message(
+                            -1, // roomId는 sendMessageToUser에서 시스템 채팅방 ID로 대체될 것임
+                            server.getSystemUserId(),
+                            "시스템",
+                            MessageType.SYSTEM,
+                            senderConfirmContent,
+                            false
+                    );
+                    server.sendMessageToUser(this.userId, senderConfirmationMessage);
+                }
 
+
+                // 2. 원본 채팅방의 참여자 중 메시지를 읽지 않은 사용자들에게 시스템 채팅방으로 알림
                 List<User> roomParticipants = chatRoomDAO.getParticipantsInRoom(renotifyRoomId);
 
                 for (User participant : roomParticipants) {
+                    // 재알림을 요청한 본인에게는 중복 알림을 보내지 않음 (위에서 이미 보냄)
                     if (participant.getUserId() == this.userId) {
                         continue;
                     }
@@ -496,14 +516,14 @@ public class ClientHandler implements Runnable {
                     boolean isRead = messageDAO.isMessageReadByUser(originalMessage.getMessageId(), participant.getUserId());
                     if (!isRead) {
                         String notificationContent = String.format(
-                                "채팅방 '%s'에 '%s'님이 보낸 메시지를 아직 읽지 않으셨습니다: \"%s\"",
+                                "채팅방 '%s'에서 '%s'님이 보낸 메시지를 아직 읽지 않으셨습니다: \"%s\"",
                                 chatRoomDAO.getChatRoomById(renotifyRoomId).getRoomName(),
                                 originalMessage.getSenderNickname(),
                                 originalMessage.getContent()
                         );
 
                         Message systemNotificationToUnreadUser = new Message(
-                                renotifyRoomId,
+                                -1, // roomId는 sendMessageToUser에서 시스템 채팅방 ID로 대체될 것임
                                 server.getSystemUserId(),
                                 "시스템",
                                 MessageType.SYSTEM,
@@ -513,6 +533,8 @@ public class ClientHandler implements Runnable {
                         server.sendMessageToUser(participant.getUserId(), systemNotificationToUnreadUser);
                     }
                 }
+                response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "재알림 요청 처리 완료", null);
+                sendResponse(response);
                 break;
 
             case GET_UNREAD_SYSTEM_NOTIFICATIONS:
@@ -521,9 +543,21 @@ public class ClientHandler implements Runnable {
                     sendResponse(response);
                     break;
                 }
-                List<Message> unreadSystemMsgs = messageDAO.getUnreadSystemMessagesForUser(this.userId, server.getSystemUserId());
-                responseData.put("messages", unreadSystemMsgs);
-                response = new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "Unread system notifications loaded", responseData);
+                // 이 부분은 이제 시스템 채팅방에 있는 메시지를 가져오도록 변경해야 함.
+                // 1. 해당 사용자의 시스템 채팅방 ID를 가져옴
+                ChatRoom systemRoom = server.ensureUserSystemChatRoom(this.userId);
+                if (systemRoom == null) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "System chat room not found for user.", null);
+                    sendResponse(response);
+                    break;
+                }
+                // 2. 시스템 채팅방의 모든 메시지를 가져옴 (미열람/열람 구분 없이)
+                List<Message> systemChatMessages = messageDAO.getMessagesInRoom(systemRoom.getRoomId());
+
+                // ClientGUI에서 unreadRoomId를 사용하여 특정 채팅방으로 연결되도록 응답 데이터에 포함
+                responseData.put("messages", systemChatMessages);
+                responseData.put("unreadRoomId", systemRoom.getRoomId()); // 시스템 채팅방 ID를 unreadRoomId로 전달
+                response = new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System chat messages loaded", responseData);
                 sendResponse(response);
                 break;
 
@@ -556,10 +590,8 @@ public class ClientHandler implements Runnable {
             List<ChatRoom> chatRooms = chatRoomDAO.getChatRoomsByUserId(this.userId);
             Map<String, Object> data = new HashMap<>();
             data.put("chatRooms", chatRooms);
-            // data 맵을 제대로 전달하고, 메시지를 "Chat room list updated"로 변경합니다.
             sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, true, "Chat room list updated", data));
         } else {
-            // 인증되지 않은 사용자에 대한 처리 (기존 로직 유지)
             System.err.println("Attempted to send chat room list for unauthenticated user.");
             sendResponse(new ServerResponse(ServerResponse.ResponseType.CHAT_ROOMS_UPDATE, false, "Not authenticated to get chat rooms.", new HashMap<>()));
         }

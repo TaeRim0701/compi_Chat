@@ -176,10 +176,12 @@ public class ChatRoomDAO {
             return chatRooms;
         }
 
-        // ORDER BY cr.created_at ASC 부분을 ORDER BY cr.last_message_at DESC로 변경
         String sql = "SELECT cr.room_id, cr.room_name, cr.created_at, cr.is_group_chat " +
                 "FROM chat_rooms cr JOIN room_participants rp ON cr.room_id = rp.room_id " +
-                "WHERE rp.user_id = ? ORDER BY cr.last_message_at DESC"; // 수정됨
+                "WHERE rp.user_id = ? ORDER BY cr.last_message_at DESC";
+
+        // MessageDAO 인스턴스 생성
+        MessageDAO messageDAO = new MessageDAO(); // 추가
 
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -211,6 +213,11 @@ public class ChatRoomDAO {
 
                     ChatRoom room = new ChatRoom(roomId, roomName, createdAt, isGroupChat);
                     room.setParticipants(participants);
+
+                    // 여기서 안 읽은 메시지 수를 설정합니다.
+                    int unreadCount = messageDAO.getUnreadMessageCount(roomId, userId);
+                    room.setUnreadMessageCount(unreadCount); // 추가
+
                     chatRooms.add(room);
                 }
             }

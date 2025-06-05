@@ -237,4 +237,14 @@ public class ChatClient {
     public void getUnreadSystemNotifications() {
         sendRequest(new ClientRequest(ClientRequest.RequestType.GET_UNREAD_SYSTEM_NOTIFICATIONS, null));
     }
+
+    public void addTimelineEvent(int roomId, String command, String description, String eventType, String eventName) { // <-- 새로운 메서드 추가
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId);
+        data.put("command", command);
+        data.put("description", description);
+        data.put("eventType", eventType);
+        data.put("eventName", eventName);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_TIMELINE_EVENT, data));
+    }
 }

@@ -1,6 +1,5 @@
 package chat.compi.Entity;
 
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
@@ -13,8 +12,16 @@ public class TimelineEvent implements Serializable {
     private String command;
     private String description;
     private LocalDateTime eventTime;
+    private String eventType;
+    private String eventName;
 
+    // 기존 생성자 (eventType, eventName 없이 호출될 경우 기본값 설정)
     public TimelineEvent(int eventId, int roomId, int userId, String username, String command, String description, LocalDateTime eventTime) {
+        this(eventId, roomId, userId, username, command, description, eventTime, "MESSAGE", null); // 기본값 설정
+    }
+
+    // 새로운 생성자 (eventType, eventName 포함)
+    public TimelineEvent(int eventId, int roomId, int userId, String username, String command, String description, LocalDateTime eventTime, String eventType, String eventName) {
         this.eventId = eventId;
         this.roomId = roomId;
         this.userId = userId;
@@ -22,9 +29,11 @@ public class TimelineEvent implements Serializable {
         this.command = command;
         this.description = description;
         this.eventTime = eventTime;
+        this.eventType = eventType;
+        this.eventName = eventName;
     }
 
-    // Getters
+    // Getters (모두 추가 또는 확인)
     public int getEventId() {
         return eventId;
     }
@@ -51,6 +60,14 @@ public class TimelineEvent implements Serializable {
 
     public LocalDateTime getEventTime() {
         return eventTime;
+    }
+
+    public String getEventType() {
+        return eventType;
+    }
+
+    public String getEventName() {
+        return eventName;
     }
 
     @Override

@@ -16,7 +16,8 @@ public class ClientRequest implements Serializable {
         SET_AWAY_STATUS, // 자리비움 상태 설정
         LEAVE_CHAT_ROOM,
         MARK_AS_NOTICE, RESEND_NOTIFICATION,
-        GET_UNREAD_SYSTEM_NOTIFICATIONS
+        GET_UNREAD_SYSTEM_NOTIFICATIONS,
+        ADD_TIMELINE_EVENT
     }
 
     private RequestType type;

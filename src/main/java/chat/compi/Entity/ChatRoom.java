@@ -10,7 +10,8 @@ public class ChatRoom implements Serializable {
     private String roomName;
     private LocalDateTime createdAt;
     private boolean isGroupChat;
-    private List<User> participants; // 참여자 목록
+    private List<User> participants;
+    private int unreadMessageCount; // 추가
 
     public ChatRoom(int roomId, String roomName, LocalDateTime createdAt, boolean isGroupChat) {
         this.roomId = roomId;
@@ -58,6 +59,15 @@ public class ChatRoom implements Serializable {
 
     public void setParticipants(List<User> participants) {
         this.participants = participants;
+    }
+
+    // unreadMessageCount Getter and Setter 추가
+    public int getUnreadMessageCount() {
+        return unreadMessageCount;
+    }
+
+    public void setUnreadMessageCount(int unreadMessageCount) {
+        this.unreadMessageCount = unreadMessageCount;
     }
 
     @Override

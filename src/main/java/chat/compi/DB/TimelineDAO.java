@@ -34,13 +34,40 @@ public class TimelineDAO {
     }
 
     /**
-     * 특정 채팅방의 타임라인 이벤트 조회
+     * 타임라인 이벤트 저장 (새로운 오버로드 메서드)
+     * @param roomId 채팅방 ID
+     * @param userId 이벤트 발생 사용자 ID
+     * @param command 명령어 (예: /start)
+     * @param description 작업 내용
+     * @param eventType 이벤트 타입 (예: PROJECT_START)
+     * @param eventName 이벤트 이름 (예: 프로젝트 이름)
+     * @return 성공 여부
+     */
+    public boolean saveTimelineEvent(int roomId, int userId, String command, String description, String eventType, String eventName) {
+        String sql = "INSERT INTO timeline_events (room_id, user_id, command, description, event_type, event_name) VALUES (?, ?, ?, ?, ?, ?)";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, roomId);
+            pstmt.setInt(2, userId);
+            pstmt.setString(3, command);
+            pstmt.setString(4, description);
+            pstmt.setString(5, eventType); // 새로운 필드 추가
+            pstmt.setString(6, eventName); // 새로운 필드 추가
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("Error saving timeline event with type and name: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 특정 채팅방의 타임라인 이벤트 조회 (event_type, event_name 필드 추가)
      * @param roomId 채팅방 ID
      * @return 타임라인 이벤트 리스트
      */
     public List<TimelineEvent> getTimelineEventsInRoom(int roomId) {
         List<TimelineEvent> events = new ArrayList<>();
-        String sql = "SELECT te.event_id, te.room_id, te.user_id, u.username, te.command, te.description, te.event_time " +
+        String sql = "SELECT te.event_id, te.room_id, te.user_id, u.username, te.command, te.description, te.event_time, te.event_type, te.event_name " +
                 "FROM timeline_events te JOIN users u ON te.user_id = u.user_id " +
                 "WHERE te.room_id = ? ORDER BY te.event_time ASC";
         try (Connection conn = DatabaseConnection.getConnection();
@@ -55,7 +82,9 @@ public class TimelineDAO {
                 String command = rs.getString("command");
                 String description = rs.getString("description");
                 LocalDateTime eventTime = rs.getTimestamp("event_time").toLocalDateTime();
-                events.add(new TimelineEvent(eventId, rId, uId, username, command, description, eventTime));
+                String eventType = rs.getString("event_type"); // 새로운 필드
+                String eventName = rs.getString("event_name"); // 새로운 필드
+                events.add(new TimelineEvent(eventId, rId, uId, username, command, description, eventTime, eventType, eventName));
             }
         } catch (SQLException e) {
             System.err.println("Error getting timeline events: " + e.getMessage());

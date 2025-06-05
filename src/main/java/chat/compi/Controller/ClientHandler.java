@@ -1,3 +1,4 @@
+// ClientHandler.java
 package chat.compi.Controller;
 
 import chat.compi.Dto.ClientRequest;
@@ -12,6 +13,10 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -155,6 +160,7 @@ public class ClientHandler implements Runnable {
                 }
 
                 ChatRoom createdOrFoundRoom = null;
+                boolean isNewRoomCreated = false; // Flag to check if a new room was actually created
 
                 if (!isGroupChatRequest) {
                     if (invitedUserIds.size() != 2) {
@@ -167,6 +173,7 @@ public class ClientHandler implements Runnable {
 
                     if (createdOrFoundRoom == null) {
                         createdOrFoundRoom = chatRoomDAO.createChatRoom("", false, this.userId, invitedUserIds);
+                        isNewRoomCreated = true; // Mark as new room created
                     }
                 } else {
                     if (roomName == null || roomName.trim().isEmpty()) {
@@ -175,6 +182,7 @@ public class ClientHandler implements Runnable {
                         break;
                     }
                     createdOrFoundRoom = chatRoomDAO.createChatRoom(roomName, true, this.userId, invitedUserIds);
+                    isNewRoomCreated = true; // Group chats are always considered new upon creation request
                 }
 
                 if (createdOrFoundRoom != null) {
@@ -182,15 +190,18 @@ public class ClientHandler implements Runnable {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Chat room created", responseData);
                     sendResponse(response);
 
-                    List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId());
-                    String participantNames = currentParticipantsOfRoom.stream()
-                            .map(User::getNickname)
-                            .collect(Collectors.joining(", "));
-                    String creationMessageContent = participantNames + " 님이 입장했습니다.";
-                    Message creationSystemMessage = new Message(createdOrFoundRoom.getRoomId(), server.getSystemUserId(), "시스템", MessageType.SYSTEM, creationMessageContent, false);
-                    server.broadcastMessageToRoom(creationSystemMessage, server.getSystemUserId());
+                    // Only broadcast system message if a new room was actually created
+                    if (isNewRoomCreated) {
+                        List<User> currentParticipantsOfRoom = chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId());
+                        String participantNames = currentParticipantsOfRoom.stream()
+                                .map(User::getNickname)
+                                .collect(Collectors.joining(", "));
+                        String creationMessageContent = participantNames + " 님이 입장했습니다.";
+                        Message creationSystemMessage = new Message(createdOrFoundRoom.getRoomId(), server.getSystemUserId(), "시스템", MessageType.SYSTEM, creationMessageContent, false);
+                        server.broadcastMessageToRoom(creationSystemMessage, server.getSystemUserId());
+                    }
 
-                    for (User participant : currentParticipantsOfRoom) {
+                    for (User participant : chatRoomDAO.getParticipantsInRoom(createdOrFoundRoom.getRoomId())) { // Ensure all participants get updated list
                         ClientHandler participantHandler = server.getConnectedClients().get(participant.getUserId());
                         if (participantHandler != null) {
                             participantHandler.sendChatRoomList();

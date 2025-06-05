@@ -583,35 +583,42 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
-    private void filterTimelineEvents() { // <-- 새로운 메서드 추가
-        String selectedProject = projectList.getSelectedValue();
-        timelineArea.setText("");
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private void filterTimelineEvents() { //
+        String selectedProject = projectList.getSelectedValue(); //
+        timelineArea.setText(""); //
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"); // 날짜 포맷 지정
 
-        List<TimelineEvent> filteredEvents = new ArrayList<>();
-        if ("모든 이벤트".equals(selectedProject)) {
-            filteredEvents.addAll(allTimelineEvents);
+        List<TimelineEvent> filteredEvents = new ArrayList<>(); //
+        if ("모든 이벤트".equals(selectedProject)) { //
+            filteredEvents.addAll(allTimelineEvents); //
         } else {
-            for (TimelineEvent event : allTimelineEvents) {
-                if (selectedProject != null && selectedProject.equals(event.getEventName())) {
-                    filteredEvents.add(event);
+            for (TimelineEvent event : allTimelineEvents) { //
+                if (selectedProject != null && selectedProject.equals(event.getEventName())) { //
+                    filteredEvents.add(event); //
                 }
             }
         }
 
         // 시간순으로 정렬 (기존에 DB에서 정렬되어 오지만, 혹시 모를 상황 대비)
-        filteredEvents.sort(Comparator.comparing(TimelineEvent::getEventTime));
+        filteredEvents.sort(Comparator.comparing(TimelineEvent::getEventTime)); //
 
-        for (TimelineEvent event : filteredEvents) {
-            String displayContent;
-            if ("PROJECT_START".equals(event.getEventType())) {
-                displayContent = "프로젝트 시작: " + event.getEventTime().format(formatter) + " " + event.getUsername() + " " + event.getDescription();
+        for (TimelineEvent event : filteredEvents) { //
+            String displayContent; //
+            // PROJECT_START 타입의 이벤트에 대해 특별한 형식 적용
+            if ("PROJECT_START".equals(event.getEventType())) { //
+                displayContent = String.format(
+                        "(%s) 프로젝트 시작 : %s _%s", // 원하는 출력 형식
+                        event.getEventTime().format(formatter), // 날짜
+                        event.getDescription(), // 내용
+                        event.getSenderNickname() // 변경: getUsername() 대신 getSenderNickname() 사용
+                );
             } else {
-                displayContent = event.getEventTime().format(formatter) + " " + event.getUsername() + " " + event.getCommand() + ": " + event.getDescription();
+                // 다른 이벤트 타입은 기존 형식 유지
+                displayContent = event.getEventTime().format(formatter) + " " + event.getSenderNickname() + " " + event.getCommand() + ": " + event.getDescription(); //
             }
-            timelineArea.append(displayContent + "\n\n");
+            timelineArea.append(displayContent + "\n\n"); //
         }
-        timelineArea.setCaretPosition(0);
+        timelineArea.setCaretPosition(0); //
     }
 
     private void initUnreadNotificationFrame() {

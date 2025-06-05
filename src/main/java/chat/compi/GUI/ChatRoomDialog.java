@@ -228,39 +228,40 @@ public class ChatRoomDialog extends JDialog {
         }
 
         if (content.startsWith("/s ")) { // "/s (프로젝트이름) (내용)" 형식 파싱
-            String[] parts = content.substring(3).split(" ", 2);
-            if (parts.length >= 2) {
-                String projectName = parts[0];
-                String projectContent = parts[1];
+            String[] parts = content.substring(3).split(" ", 2); //
+            if (parts.length >= 2) { //
+                String projectName = parts[0]; //
+                String projectContent = parts[1]; // // 이 부분이 원하는 '내용'이 됩니다.
                 // ChatClient.java의 addTimelineEvent 메서드를 호출하여 서버로 타임라인 이벤트 전송
-                chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", projectContent, "PROJECT_START", projectName);
-                messageInput.setText("");
+                // description에 '프로젝트 시작: ' 접두사를 제거하고 순수 내용만 전달
+                chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", projectContent, "PROJECT_START", projectName); //
+                messageInput.setText(""); //
                 return; // 타임라인 이벤트로 처리되었으므로 일반 메시지 전송을 하지 않음
             } else {
-                JOptionPane.showMessageDialog(this, "프로젝트 시작 명령어 형식이 올바르지 않습니다.\n예시: /s 프로젝트이름 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(this, "프로젝트 시작 명령어 형식이 올바르지 않습니다.\n예시: /s 프로젝트이름 내용", "입력 오류", JOptionPane.WARNING_MESSAGE); //
                 messageInput.setText(""); // 입력 필드 초기화
                 return;
             }
         }
 
         // 기존 메시지 전송 로직 (명령어 또는 일반 텍스트)
-        MessageType type = MessageType.TEXT;
+        MessageType type = MessageType.TEXT; //
 
-        if (content.startsWith("/")) {
-            String[] parts = content.split(" ", 2);
-            String command = parts[0];
-            String description = parts.length > 1 ? parts[1] : "";
+        if (content.startsWith("/")) { //
+            String[] parts = content.split(" ", 2); //
+            String command = parts[0]; //
+            String description = parts.length > 1 ? parts[1] : ""; //
 
-            if (command.equals("/start") || command.equals("/end")) {
-                chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
+            if (command.equals("/start") || command.equals("/end")) { //
+                chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false); //
             } else {
-                chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
+                chatClient.sendMessage(chatRoom.getRoomId(), content, type, false); //
             }
         } else {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
+            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false); //
         }
 
-        messageInput.setText("");
+        messageInput.setText(""); //
     }
 
     private void attachFile() {

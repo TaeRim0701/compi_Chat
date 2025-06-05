@@ -345,20 +345,23 @@ public class ChatServer {
     public void sendMessageToUser(int targetUserId, Message message) {
         ClientHandler handler = connectedClients.get(targetUserId);
 
+        // 메시지를 먼저 DB에 저장하고, 저장된 Message 객체를 사용합니다.
         Message savedMessage = messageDAO.saveMessage(message);
         if (savedMessage == null) {
-            System.err.println("Failed to save system notification message to DB.");
-            return;
+            System.err.println("Failed to save system notification message to DB. Not sending notification to client " + targetUserId);
+            return; // DB 저장 실패 시 클라이언트에게 보내지 않고 종료
         }
 
-        messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId());
-
+        // 시스템 메시지는 발신자가 시스템이므로, 시스템이 보낸 메시지는 시스템 ID로 읽음 처리합니다.
+        // 이는 시스템 알림이 DB에 저장되자마자 시스템 스스로 '읽었다'고 기록하는 것이므로,
+        // 클라이언트가 이 알림을 받아볼 때 '안 읽음' 상태로 인지하게 됩니다.
+        messageDAO.markMessageAsRead(savedMessage.getMessageId(), getSystemUserId()); // 시스템 메시지 발신자(시스템 유저)가 읽음 처리
 
         if (handler != null) {
             Map<String, Object> data = new HashMap<>();
-            data.put("message", savedMessage);
-            data.put("senderId", getSystemUserId());
-            data.put("unreadRoomId", savedMessage.getRoomId());
+            data.put("message", savedMessage); // 저장된 메시지 객체를 전달
+            data.put("senderId", getSystemUserId()); // 시스템 메시지의 발신자는 시스템 유저
+            data.put("unreadRoomId", savedMessage.getRoomId()); //
             handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System Notification", data));
             System.out.println("Sent system notification (real-time) to user " + targetUserId + " for room " + savedMessage.getRoomId());
         } else {

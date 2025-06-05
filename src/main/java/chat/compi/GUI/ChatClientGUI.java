@@ -106,7 +106,7 @@ public class ChatClientGUI extends JFrame {
         System.out.println("DEBUG: Message read confirmed from server. Message ID: " + response.getData().get("messageId"));
     }
 
-    private void handleMessageAlreadyRead(ServerResponse response) {
+    private void handleMessageAlreadyRead(ServerResponse response) { // 추가
         System.out.println("DEBUG: Message " + response.getData().get("messageId") + " was already read. No action needed.");
     }
 

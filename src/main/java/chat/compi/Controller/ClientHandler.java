@@ -72,6 +72,7 @@ public class ClientHandler implements Runnable {
     private void handleRequest(ClientRequest request) {
         Map<String, Object> responseData = new HashMap<>();
         ServerResponse response = null;
+        boolean success;
 
         switch (request.getType()) {
             case LOGIN:
@@ -293,8 +294,9 @@ public class ClientHandler implements Runnable {
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
-                boolean success = messageDAO.markMessageAsRead(messageIdToRead, this.userId);
-                if (success) {
+                int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId); // 새로운 반환 값 사용
+
+                if (readStatus == 1) { // 성공적으로 읽음 처리된 경우
                     responseData.put("messageId", messageIdToRead);
                     response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", responseData);
                     sendResponse(response);
@@ -302,8 +304,12 @@ public class ClientHandler implements Runnable {
                     if (readMsg != null) {
                         server.updateUnreadCountsForRoom(readMsg.getRoomId());
                     }
-                } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read", null);
+                } else if (readStatus == 0) { // 이미 읽음 처리된 메시지인 경우
+                    responseData.put("messageId", messageIdToRead);
+                    response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, true, "Message was already marked as read", responseData);
+                    sendResponse(response);
+                } else { // DB 오류 등으로 실패한 경우 (readStatus == -1)
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read due to DB error", null);
                     sendResponse(response);
                 }
                 break;
@@ -438,25 +444,25 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-            case LEAVE_CHAT_ROOM:
-                if (this.userId == -1) {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot leave chat room.", null);
-                    sendResponse(response);
-                    break;
+            case LEAVE_CHAT_ROOM: //
+                if (this.userId == -1) { //
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Not logged in. Cannot leave chat room.", null); //
+                    sendResponse(response); //
+                    break; //
                 }
 
-                int roomIdToLeave = (int) request.getData().get("roomId");
-                success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId);
-                if (success) {
-                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);
-                    sendResponse(response);
+                int roomIdToLeave = (int) request.getData().get("roomId"); //
+                success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId); //
+                if (success) { //
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null); //
+                    sendResponse(response); //
 
-                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave);
-                    sendChatRoomList();
+                    server.notifyRoomParticipantsOfRoomUpdate(roomIdToLeave); //
+                    sendChatRoomList(); //
                 } else {
-                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null);
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to leave chat room.", null); //
                 }
-                sendResponse(response);
+                sendResponse(response); //
                 break;
 
             case RESEND_NOTIFICATION:

@@ -1,6 +1,5 @@
 package chat.compi.DB;
 
-
 import chat.compi.Entity.Message;
 import chat.compi.Entity.MessageType;
 import chat.compi.Entity.User;

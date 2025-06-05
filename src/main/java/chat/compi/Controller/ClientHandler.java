@@ -1,4 +1,3 @@
-// ClientHandler.java
 package chat.compi.Controller;
 
 import chat.compi.Dto.ClientRequest;
@@ -13,10 +12,6 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

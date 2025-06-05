@@ -9,8 +9,6 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
@@ -51,8 +49,9 @@ public class ChatClientGUI extends JFrame {
     private JTextArea noticeArea;
     private JFrame timelineFrame;
     private JTextArea timelineArea;
-    private JFrame unreadNotificationFrame; // 이 프레임은 이제 시스템 채팅방을 열도록 유도하는 역할로 변경될 수 있습니다.
-    private JTextArea unreadNotificationArea; // 이 영역은 이제 직접 메시지를 표시하기보다 안내 문구를 표시할 수 있습니다.
+    // 미열람 알림 팝업창 관련 필드 삭제
+    // private JFrame unreadNotificationFrame;
+    // private JTextArea unreadNotificationArea;
 
     private JList<String> projectList; // 프로젝트 이름 목록
     private DefaultListModel<String> projectListModel;
@@ -99,10 +98,11 @@ public class ChatClientGUI extends JFrame {
 
         initNoticeFrame();
         initTimelineFrame();
-        initUnreadNotificationFrame(); // 미열람 알림 프레임 초기화
+        // 미열람 알림 팝업창 초기화 호출 삭제
+        // initUnreadNotificationFrame();
 
-        // 초기 로드 시 미열람 시스템 알림 가져오기 (이후에는 시스템 채팅방으로 메시지가 들어올 것)
-        loadUnreadSystemNotifications();
+        // 초기 로드 시 미열람 시스템 알림 가져오기 호출 삭제 (이제 시스템 채팅방으로 메시지가 들어오고 ChatRooms 업데이트를 통해 목록에 표시됨)
+        // loadUnreadSystemNotifications();
     }
 
     private void handleMessageReadConfirm(ServerResponse response) {
@@ -375,12 +375,26 @@ public class ChatClientGUI extends JFrame {
                 System.out.println("New message received for room " + messageRoomId + ", dialog not open. Content: " + newMessage.getContent());
                 // 채팅방이 열려있지 않더라도, 메시지가 도착했으므로 채팅방 목록을 업데이트하여 안 읽은 메시지 수를 표시
                 chatClient.getChatRooms();
-                // 시스템 메시지인 경우, 미열람 알림 창에 메시지 도착을 알리거나, 시스템 채팅방을 자동으로 열도록 유도
+                // 시스템 메시지인 경우, 시스템 채팅방을 자동으로 열도록 유도 (팝업 대신)
                 if (newMessage.getMessageType() == MessageType.SYSTEM) {
-                    // 여기에 System Message Notification을 처리하는 로직을 추가할 수 있음
-                    // (예: 미열람 알림 창을 띄우거나, 클릭하면 시스템 채팅방을 열도록)
-                    // 현재는 그냥 chatRooms 업데이트로만 알림을 표시하고, loadUnreadSystemNotifications()로 과거 메시지 로드 시에만 창을 띄움
-                    appendSystemNotification(newMessage, messageRoomId); // 이 메서드는 이제 시스템 채팅방을 열도록 유도
+                    // ChatRoomListModel에서 해당 시스템 채팅방을 찾아 엽니다.
+                    ChatRoom systemChatRoom = null;
+                    for (int i = 0; i < chatRoomListModel.size(); i++) {
+                        ChatRoom room = chatRoomListModel.getElementAt(i);
+                        // 시스템 채팅방은 roomName이 "시스템 메시지 for [내 닉네임]" 형태로 지정될 가능성이 높으므로
+                        // 또는 ChatRoom 객체에 isSystemChat 플래그를 추가하는 것도 좋은 방법입니다.
+                        // 현재는 이름으로 임시 판단
+                        if (room.getRoomName() != null && room.getRoomName().startsWith("시스템 메시지 for " + currentUser.getNickname())) {
+                            systemChatRoom = room;
+                            break;
+                        }
+                    }
+                    if (systemChatRoom != null) {
+                        openChatRoomDialog(systemChatRoom); // 시스템 채팅방 다이얼로그 열기
+                    } else {
+                        // 시스템 채팅방을 찾지 못했다면, 목록 업데이트 후 다시 시도하거나 로그를 남김
+                        System.err.println("System chat room with ID " + messageRoomId + " not found in chatRoomListModel after chatRooms update.");
+                    }
                 }
             }
             if (newMessage.getMessageType() != MessageType.SYSTEM) {
@@ -494,8 +508,7 @@ public class ChatClientGUI extends JFrame {
                     System.err.println("System chat room with ID " + targetRoomId + " not found in chatRoomListModel. Requesting chat rooms update.");
                     // 채팅방 목록을 다시 요청하여 시스템 채팅방이 목록에 추가되도록 함
                     chatClient.getChatRooms();
-                    // 이 메시지는 일단 미열람 알림 영역에 표시 (임시)
-                    appendSystemNotification(notificationMessage, targetRoomId);
+                    // 이 메시지는 (팝업창 없이) 로그로만 남깁니다.
                 }
             }
         });
@@ -647,82 +660,6 @@ public class ChatClientGUI extends JFrame {
             timelineArea.append(displayContent + "\n\n");
         }
         timelineArea.setCaretPosition(0);
-    }
-
-    private void initUnreadNotificationFrame() {
-        unreadNotificationFrame = new JFrame("미열람 알림");
-        unreadNotificationFrame.setSize(300, 200);
-        unreadNotificationFrame.setLocation(this.getX() + this.getWidth() - 320, this.getY() + 30);
-        unreadNotificationFrame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
-
-        unreadNotificationArea = new JTextArea();
-        unreadNotificationArea.setEditable(false);
-        unreadNotificationArea.setLineWrap(true);
-        unreadNotificationArea.setWrapStyleWord(true);
-        JScrollPane scrollPane = new JScrollPane(unreadNotificationArea);
-        unreadNotificationFrame.add(scrollPane);
-
-        // 미열람 알림 창을 클릭하면 시스템 채팅방을 열도록 리스너 추가
-        unreadNotificationFrame.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                // 시스템 메시지는 특정 룸 ID (시스템 채팅방)와 연결되어 있으므로,
-                // 이 창을 클릭하면 해당 시스템 채팅방을 엽니다.
-                // 여기서는 간단히 최신 시스템 채팅방(가장 위에 있을 것으로 예상)을 열도록 처리
-                // 실제로는 unreadNotificationArea에 표시된 메시지에 따라 특정 채팅방을 여는 것이 더 정확할 수 있습니다.
-                // 하지만 현재는 메시지 자체를 직접 클릭하는 것이 아니므로, 단순화된 로직을 적용합니다.
-
-                // 채팅방 목록에서 "시스템 메시지 for [내 닉네임]"으로 시작하는 채팅방을 찾아 엽니다.
-                // 또는 가장 최근에 메시지가 온 시스템 채팅방을 찾을 수 있습니다.
-                // 여기서는 모든 채팅방을 확인하여 시스템 채팅방을 찾도록 합니다.
-                SwingUtilities.invokeLater(() -> {
-                    ChatRoom systemRoom = null;
-                    for (int i = 0; i < chatRoomListModel.size(); i++) {
-                        ChatRoom room = chatRoomListModel.getElementAt(i);
-                        if (room.getRoomName() != null && room.getRoomName().startsWith("시스템 메시지 for")) {
-                            systemRoom = room;
-                            break;
-                        }
-                    }
-                    if (systemRoom != null) {
-                        openChatRoomDialog(systemRoom);
-                        unreadNotificationFrame.setVisible(false); // 창 닫기
-                        unreadNotificationArea.setText(""); // 내용 초기화
-                    } else {
-                        JOptionPane.showMessageDialog(unreadNotificationFrame, "시스템 채팅방을 찾을 수 없습니다.", "오류", JOptionPane.ERROR_MESSAGE);
-                    }
-                });
-            }
-        });
-    }
-
-    // appendSystemNotification 메서드 수정: 이제 이 메서드는 시스템 채팅방으로의 안내 역할을 주로 수행합니다.
-    private void appendSystemNotification(Message notificationMessage, int unreadRoomId) {
-        SwingUtilities.invokeLater(() -> {
-            try {
-                // 기존 미열람 알림 영역에 메시지를 추가하는 대신, 시스템 채팅방으로 안내하는 텍스트를 표시
-                String notificationText = String.format(
-                        "새 시스템 메시지가 도착했습니다! 클릭하여 [시스템 메시지] 채팅방으로 이동하세요.\n\n" +
-                                "내용: %s", notificationMessage.getContent()
-                );
-                unreadNotificationArea.setText(notificationText); // 이전 내용을 덮어쓰고 새로운 알림 표시
-                unreadNotificationArea.setCaretPosition(0);
-
-                if (!unreadNotificationFrame.isVisible()) {
-                    unreadNotificationFrame.setVisible(true);
-                }
-            } catch (Exception e) {
-                System.err.println("Error preparing system notification for unread notification area: " + e.getMessage());
-            }
-        });
-    }
-
-    private void loadUnreadSystemNotifications() {
-        if (chatClient.getCurrentUser() != null) {
-            chatClient.getUnreadSystemNotifications(); // 서버로부터 미열람 시스템 메시지 요청
-            // 이 요청에 대한 응답은 handleSystemNotification에서 처리될 것입니다.
-            // handleSystemNotification에서는 메시지를 받으면 자동으로 시스템 채팅방을 열도록 유도합니다.
-        }
     }
 
     private void toggleSettingsPanel() {

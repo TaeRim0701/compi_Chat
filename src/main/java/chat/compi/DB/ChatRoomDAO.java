@@ -1,4 +1,3 @@
-// ChatRoomDAO.java
 package chat.compi.DB;
 
 import chat.compi.Entity.ChatRoom;

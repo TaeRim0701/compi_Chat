@@ -1,9 +1,7 @@
 package chat.compi.Controller;
 
-
 import chat.compi.Dto.ClientRequest;
-import chat.compi.Entity.ChatRoom;
-import chat.compi.Entity.Message;
+
 import chat.compi.Dto.ServerResponse;
 import chat.compi.Entity.MessageType;
 import chat.compi.Entity.User;
@@ -12,12 +10,12 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import java.util.Collections;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue; // <-- 이 줄이 있어야 합니다.
-import java.util.concurrent.LinkedBlockingQueue; // <-- 이 줄이 있어야 합니다.
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
 
 public class ChatClient {

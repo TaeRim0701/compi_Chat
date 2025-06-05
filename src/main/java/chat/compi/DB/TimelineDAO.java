@@ -1,6 +1,5 @@
 package chat.compi.DB;
 
-
 import chat.compi.Entity.TimelineEvent;
 
 import java.sql.*;

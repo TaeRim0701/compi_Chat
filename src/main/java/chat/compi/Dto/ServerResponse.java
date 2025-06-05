@@ -35,10 +35,6 @@ public class ServerResponse implements Serializable {
         return type;
     }
 
-    public boolean isSuccess() {
-        return success;
-    }
-
     public String getMessage() {
         return message;
     }

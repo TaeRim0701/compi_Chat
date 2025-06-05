@@ -1,4 +1,3 @@
-// ChatServer.java
 package chat.compi.Controller;
 
 import chat.compi.DB.DatabaseConnection;
@@ -12,8 +11,6 @@ import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -34,7 +31,6 @@ public class ChatServer {
     private MessageDAO messageDAO;
     private ChatRoomDAO chatRoomDAO;
     private ScheduledExecutorService scheduler;
-    private Map<Integer, ChatRoom> chatRooms; // 이 필드는 현재 사용되지 않는 것으로 보입니다. 삭제해도 무방합니다.
 
     private static final String SYSTEM_USERNAME = "system_bot";
     private int systemUserId;

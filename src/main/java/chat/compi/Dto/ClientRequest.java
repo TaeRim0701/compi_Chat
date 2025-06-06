@@ -17,7 +17,7 @@ public class ClientRequest implements Serializable {
         LEAVE_CHAT_ROOM,
         MARK_AS_NOTICE, RESEND_NOTIFICATION,
         GET_UNREAD_SYSTEM_NOTIFICATIONS,
-        ADD_TIMELINE_EVENT
+        ADD_TIMELINE_EVENT, DELETE_TIMELINE_EVENT
     }
 
     private RequestType type;

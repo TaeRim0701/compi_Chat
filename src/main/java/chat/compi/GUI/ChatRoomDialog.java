@@ -209,9 +209,6 @@ public class ChatRoomDialog extends JDialog {
 
     public void loadMessages() {
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
-        // 채팅방에 들어올 때 (메시지 로드 시) 모든 안 읽은 메시지를 읽음 처리 요청
-        // 서버에서 메시지 목록을 받아올 때, 클라이언트는 각 메시지에 대해 '읽음' 요청을 보냅니다.
-        // 이 요청은 비동기적으로 처리되므로 UI가 멈추지 않습니다.
     }
 
     public void updateChatRoomInfo(ChatRoom updatedRoom) {
@@ -221,47 +218,45 @@ public class ChatRoomDialog extends JDialog {
         System.out.println("ChatRoomDialog for room " + chatRoom.getRoomId() + " updated. New participant count: " + chatRoom.getParticipants().size());
     }
 
-    private void sendMessage() { // <-- 이 메서드 수정
+    private void sendMessage() {
         String content = messageInput.getText().trim();
         if (content.isEmpty()) {
             return;
         }
 
-        if (content.startsWith("/s ")) { // "/s (프로젝트이름) (내용)" 형식 파싱
-            String[] parts = content.substring(3).split(" ", 2); //
-            if (parts.length >= 2) { //
-                String projectName = parts[0]; //
-                String projectContent = parts[1]; // // 이 부분이 원하는 '내용'이 됩니다.
-                // ChatClient.java의 addTimelineEvent 메서드를 호출하여 서버로 타임라인 이벤트 전송
-                // description에 '프로젝트 시작: ' 접두사를 제거하고 순수 내용만 전달
-                chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", projectContent, "PROJECT_START", projectName); //
-                messageInput.setText(""); //
-                return; // 타임라인 이벤트로 처리되었으므로 일반 메시지 전송을 하지 않음
-            } else {
-                JOptionPane.showMessageDialog(this, "프로젝트 시작 명령어 형식이 올바르지 않습니다.\n예시: /s 프로젝트이름 내용", "입력 오류", JOptionPane.WARNING_MESSAGE); //
-                messageInput.setText(""); // 입력 필드 초기화
+        if (content.startsWith("/s ")) {
+            String projectName = content.substring(3).trim();
+            if (projectName.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "프로젝트 이름을 입력해주세요.\n예시: /s 나의 멋진 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                messageInput.setText("");
                 return;
             }
+            chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", "프로젝트 시작", "PROJECT_START", projectName);
+            messageInput.setText("");
+            return;
         }
-
-        // 기존 메시지 전송 로직 (명령어 또는 일반 텍스트)
-        MessageType type = MessageType.TEXT; //
-
-        if (content.startsWith("/")) { //
-            String[] parts = content.split(" ", 2); //
-            String command = parts[0]; //
-            String description = parts.length > 1 ? parts[1] : ""; //
-
-            if (command.equals("/start") || command.equals("/end")) { //
-                chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false); //
-            } else {
-                chatClient.sendMessage(chatRoom.getRoomId(), content, type, false); //
+        // "/del (프로젝트 이름)" 명령어 처리 추가
+        else if (content.startsWith("/del ")) {
+            String projectNameToDelete = content.substring(5).trim(); // "/del " 이후의 모든 내용
+            if (projectNameToDelete.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "삭제할 프로젝트 이름을 입력해주세요.\n예시: /del 삭제할 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                messageInput.setText("");
+                return;
             }
-        } else {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false); //
+            // 서버로 삭제 요청 전송
+            chatClient.deleteTimelineEvent(chatRoom.getRoomId(), projectNameToDelete);
+            messageInput.setText("");
+            return;
         }
 
-        messageInput.setText(""); //
+        // 기존 메시지 전송 로직
+        MessageType type = MessageType.TEXT;
+        if (content.startsWith("/")) {
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
+        } else {
+            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
+        }
+        messageInput.setText("");
     }
 
     private void attachFile() {
@@ -283,7 +278,6 @@ public class ChatRoomDialog extends JDialog {
         JOptionPane.showMessageDialog(this, "파일 다운로드 요청됨. 서버 응답을 기다립니다.", "정보", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    // ChatRoomDialog.java - displayMessages 메서드 내
     public void displayMessages(List<Message> messages) {
         try {
             doc.remove(0, doc.getLength());
@@ -291,9 +285,6 @@ public class ChatRoomDialog extends JDialog {
                 for (Message message : messages) {
                     appendMessageToChatArea(message);
 
-                    // 메시지 로드 시 읽음 처리 요청:
-                    // 현재 사용자가 보낸 메시지가 아니고, 시스템 메시지가 아니며,
-                    // 그리고 아직 읽지 않은 메시지인 경우에만 읽음 처리 요청
                     if (message.getSenderId() != currentUser.getUserId() && message.getMessageType() != MessageType.SYSTEM) {
                         boolean isReadByCurrentUser = message.getReaders() != null &&
                                 message.getReaders().stream().anyMatch(reader -> reader.getUserId() == currentUser.getUserId());
@@ -303,7 +294,7 @@ public class ChatRoomDialog extends JDialog {
                     }
                 }
             }
-            chatArea.setCaretPosition(doc.getLength()); // 메시지 표시 후 스크롤을 맨 아래로
+            chatArea.setCaretPosition(doc.getLength());
 
         } catch (BadLocationException e) {
             System.err.println("Error clearing or appending messages: " + e.getMessage());
@@ -325,28 +316,25 @@ public class ChatRoomDialog extends JDialog {
             String outerDivAlign;
             String innerBubbleMargin;
 
-            // 내 메시지인 경우 (오른쪽 정렬)
             if (message.getSenderId() == currentUser.getUserId()) {
-                backgroundColor = "#DCF8C6"; // 연한 초록색
+                backgroundColor = "#DCF8C6";
                 outerDivAlign = "text-align: right;";
-                innerBubbleMargin = "margin-left: 15%;"; // 오른쪽으로 밀기
-            } else { // 상대방이 보낸 메시지인 경우 (왼쪽 정렬)
-                backgroundColor = "#E5E5EA"; // 연한 회색
+                innerBubbleMargin = "margin-left: 15%;";
+            } else {
+                backgroundColor = "#E5E5EA";
                 outerDivAlign = "text-align: left;";
-                innerBubbleMargin = "margin-right: 15%;"; // 왼쪽으로 밀기
+                innerBubbleMargin = "margin-right: 15%;";
             }
 
-            // 공지 메시지 스타일 (우선순위 높음)
             if (message.isNotice()) {
-                backgroundColor = "#FFF2CC"; // 노란색 계열
+                backgroundColor = "#FFF2CC";
                 textColor = "red";
                 fontWeight = "bold";
                 prefix = "<span style='color: red;'>[공지] </span>";
-                outerDivAlign = "text-align: center;"; // 중앙 정렬
-                innerBubbleMargin = "margin-left: auto; margin-right: auto;"; // 중앙 정렬을 위한 자동 마진
+                outerDivAlign = "text-align: center;";
+                innerBubbleMargin = "margin-left: auto; margin-right: auto;";
             }
 
-            // 메시지 타입별 스타일
             String contentToShow = message.getContent();
             String timestampAndSender;
 
@@ -367,40 +355,34 @@ public class ChatRoomDialog extends JDialog {
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
-            } else { // 일반 텍스트 메시지
+            } else {
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
             }
 
-            // '읽은 사람' 목록 또는 '미열람자 수' 표시 로직
             if (message.getMessageType() != MessageType.SYSTEM && message.getReaders() != null) {
                 List<String> readerNicknames = message.getReaders().stream()
-                        .filter(reader -> reader.getUserId() != message.getSenderId()) // 메시지 발신자는 '읽은 사람'에서 제외
+                        .filter(reader -> reader.getUserId() != message.getSenderId())
                         .map(User::getNickname)
                         .collect(Collectors.toList());
 
                 if (!readerNicknames.isEmpty()) {
                     suffix = " <span style='font-size: 0.7em; color: #666;'>읽음: " + String.join(", ", readerNicknames) + "</span>";
                 } else {
-                    // 발신자가 자신의 메시지를 볼 때만 미열람자 수를 표시합니다.
-                    // 수신자는 자신이 메시지를 읽는 순간 미열람자 수가 0으로 갱신되므로,
-                    // 이 조건은 발신자가 보낸 메시지를 다른 사람들이 아직 읽지 않았을 때 유용합니다.
                     if (message.getSenderId() == currentUser.getUserId() && message.getUnreadCount() > 0) {
                         suffix = " <span style='font-size: 0.8em; color: gray;'>(" + message.getUnreadCount() + "명 미열람)</span>";
                     }
                 }
             }
 
-
-            // HTML 메시지 구조에 data-message-id 속성 추가
             String htmlMessage = String.format(
                     "<div data-message-id='%d' style='clear: both; margin-bottom: 5px; %s'>" +
                             "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" +
                             "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" +
                             "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" +
                             "</div></div>",
-                    message.getMessageId(), // messageId를 data-message-id에 전달
+                    message.getMessageId(),
                     outerDivAlign,
                     backgroundColor,
                     innerBubbleMargin,

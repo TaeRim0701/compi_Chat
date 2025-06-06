@@ -94,22 +94,17 @@ public class ChatClientGUI extends JFrame {
         initComponents();
 
         chatClient.getFriendList();
-        chatClient.getChatRooms(); // 시스템 채팅방이 생성된 후 업데이트된 목록을 받아옴
+        chatClient.getChatRooms();
 
         initNoticeFrame();
         initTimelineFrame();
-        // 미열람 알림 팝업창 초기화 호출 삭제
-        // initUnreadNotificationFrame();
-
-        // 초기 로드 시 미열람 시스템 알림 가져오기 호출 삭제 (이제 시스템 채팅방으로 메시지가 들어오고 ChatRooms 업데이트를 통해 목록에 표시됨)
-        // loadUnreadSystemNotifications();
     }
 
     private void handleMessageReadConfirm(ServerResponse response) {
         System.out.println("DEBUG: Message read confirmed from server. Message ID: " + response.getData().get("messageId"));
     }
 
-    private void handleMessageAlreadyRead(ServerResponse response) { // 추가
+    private void handleMessageAlreadyRead(ServerResponse response) {
         System.out.println("DEBUG: Message " + response.getData().get("messageId") + " was already read. No action needed.");
     }
 
@@ -123,12 +118,14 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_UPDATE, this::handleTimelineUpdate);
         chatClient.setResponseListener(ServerResponse.ResponseType.FILE_UPLOAD_SUCCESS, this::handleFileUploadSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.FILE_DOWNLOAD_SUCCESS, this::handleFileDownloadSuccess);
-        chatClient.setResponseListener(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, this::handleSystemNotification); // 시스템 알림 처리 메서드 유지
+        chatClient.setResponseListener(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, this::handleSystemNotification);
         chatClient.setResponseListener(ServerResponse.ResponseType.ROOM_MESSAGES_UPDATE, this::handleRoomMessagesUpdate);
         chatClient.setResponseListener(ServerResponse.ResponseType.SUCCESS, this::handleGeneralSuccessResponse);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_MARKED_AS_NOTICE_SUCCESS, this::handleMessageMarkedAsNoticeSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, this::handleMessageReadConfirm);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, this::handleMessageAlreadyRead);
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, this::handleTimelineEventDeletedSuccess); // 추가
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, this::handleTimelineEventDeleteFail); // 추가
     }
 
     private void initComponents() {
@@ -311,7 +308,6 @@ public class ChatClientGUI extends JFrame {
                 updatedChatRooms = new ArrayList<>();
             }
 
-            // 현재 열려있는 다이얼로그 중 업데이트된 목록에 없는 방은 닫기
             List<Integer> currentRoomIdsInModel = updatedChatRooms.stream()
                     .map(ChatRoom::getRoomId)
                     .collect(Collectors.toList());
@@ -329,13 +325,11 @@ public class ChatClientGUI extends JFrame {
                 }
             }
 
-            // 모델 업데이트
             chatRoomListModel.clear();
             for (ChatRoom room : updatedChatRooms) {
                 chatRoomListModel.addElement(room);
             }
 
-            // 열려있는 다이얼로그의 정보 업데이트
             for (ChatRoom updatedRoom : updatedChatRooms) {
                 ChatRoomDialog dialog = openChatRoomDialogs.get(updatedRoom.getRoomId());
                 if (dialog != null) {
@@ -343,7 +337,6 @@ public class ChatClientGUI extends JFrame {
                 }
             }
 
-            // 현재 선택된 채팅방이 있다면 다시 선택 상태 유지
             if (currentChatRoom != null && openChatRoomDialogs.containsKey(currentChatRoom.getRoomId())) {
                 int index = -1;
                 for (int i = 0; i < chatRoomListModel.size(); i++) {
@@ -363,42 +356,34 @@ public class ChatClientGUI extends JFrame {
     private void handleNewMessage(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             Message newMessage = (Message) response.getData().get("message");
-            // 시스템 메시지인 경우, unreadRoomId를 사용하여 해당 채팅방으로 메시지를 전달
             Integer unreadRoomIdInteger = (Integer) response.getData().get("unreadRoomId");
             int messageRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : newMessage.getRoomId();
 
-            ChatRoomDialog dialog = openChatRoomDialogs.get(messageRoomId); // 메시지의 실제 방 ID 또는 시스템 채팅방 ID로 다이얼로그 찾기
+            ChatRoomDialog dialog = openChatRoomDialogs.get(messageRoomId);
             if (dialog != null) {
                 System.out.println("Appending new message to existing dialog for room: " + messageRoomId);
                 dialog.appendMessageToChatArea(newMessage);
             } else {
                 System.out.println("New message received for room " + messageRoomId + ", dialog not open. Content: " + newMessage.getContent());
-                // 채팅방이 열려있지 않더라도, 메시지가 도착했으므로 채팅방 목록을 업데이트하여 안 읽은 메시지 수를 표시
                 chatClient.getChatRooms();
-                // 시스템 메시지인 경우, 시스템 채팅방을 자동으로 열도록 유도 (팝업 대신)
                 if (newMessage.getMessageType() == MessageType.SYSTEM) {
-                    // ChatRoomListModel에서 해당 시스템 채팅방을 찾아 엽니다.
                     ChatRoom systemChatRoom = null;
                     for (int i = 0; i < chatRoomListModel.size(); i++) {
                         ChatRoom room = chatRoomListModel.getElementAt(i);
-                        // 시스템 채팅방은 roomName이 "시스템 메시지 for [내 닉네임]" 형태로 지정될 가능성이 높으므로
-                        // 또는 ChatRoom 객체에 isSystemChat 플래그를 추가하는 것도 좋은 방법입니다.
-                        // 현재는 이름으로 임시 판단
-                        if (room.getRoomName() != null && room.getRoomName().startsWith("시스템 메시지 for " + currentUser.getNickname())) {
+                        if (room.getRoomId() == messageRoomId) {
                             systemChatRoom = room;
                             break;
                         }
                     }
                     if (systemChatRoom != null) {
-                        openChatRoomDialog(systemChatRoom); // 시스템 채팅방 다이얼로그 열기
+                        openChatRoomDialog(systemChatRoom);
                     } else {
-                        // 시스템 채팅방을 찾지 못했다면, 목록 업데이트 후 다시 시도하거나 로그를 남김
                         System.err.println("System chat room with ID " + messageRoomId + " not found in chatRoomListModel after chatRooms update.");
                     }
                 }
             }
             if (newMessage.getMessageType() != MessageType.SYSTEM) {
-                chatClient.getChatRooms(); // 일반 메시지는 채팅방 목록 업데이트 (안 읽은 메시지 수 갱신)
+                chatClient.getChatRooms();
             }
         });
     }
@@ -464,34 +449,27 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
-    // 시스템 알림 처리 메서드 (SYSTEM_NOTIFICATION 응답을 받으면 호출됨)
     private void handleSystemNotification(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             Message notificationMessage = (Message) response.getData().get("message");
             Integer unreadRoomIdInteger = (Integer) response.getData().get("unreadRoomId");
-            int targetRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : notificationMessage.getRoomId(); // 시스템 채팅방 ID
+            int targetRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : notificationMessage.getRoomId();
 
-            // notificationMessage가 null인지 확인하는 방어 코드 추가
             if (notificationMessage == null) {
                 System.err.println("Error: Received SYSTEM_NOTIFICATION with null message object.");
                 return;
             }
 
-            // 시스템 메시지가 특정 채팅방과 관련 있다면 해당 채팅방 다이얼로그에 표시
             ChatRoomDialog dialog = openChatRoomDialogs.get(targetRoomId);
 
             if (dialog != null) {
-                // 다이얼로그가 이미 열려있으면 메시지만 추가
                 System.out.println("Appending system message to existing dialog for room: " + targetRoomId);
                 dialog.appendMessageToChatArea(notificationMessage);
-                // 다이얼로그가 열려 있으면 최신 메시지 읽음 처리도 요청 (시스템 메시지는 보통 자동 읽음 처리 되지만, 혹시 모를 경우)
                 if (notificationMessage.getMessageId() != 0) {
                     chatClient.markMessageAsRead(notificationMessage.getMessageId());
                 }
             } else {
-                // 다이얼로그가 열려있지 않으면, 시스템 채팅방을 찾아서 열고 메시지를 표시
                 System.out.println("New system message received for room " + targetRoomId + ", dialog not open. Attempting to open.");
-                // chatRoomListModel에서 해당 시스템 채팅방을 찾아 엽니다.
                 ChatRoom systemChatRoom = null;
                 for (int i = 0; i < chatRoomListModel.size(); i++) {
                     ChatRoom room = chatRoomListModel.getElementAt(i);
@@ -502,13 +480,10 @@ public class ChatClientGUI extends JFrame {
                 }
 
                 if (systemChatRoom != null) {
-                    openChatRoomDialog(systemChatRoom); // 시스템 채팅방 다이얼로그 열기
-                    // 메시지 로드는 openChatRoomDialog 내부에서 loadMessages() 호출 시 이루어짐
+                    openChatRoomDialog(systemChatRoom);
                 } else {
                     System.err.println("System chat room with ID " + targetRoomId + " not found in chatRoomListModel. Requesting chat rooms update.");
-                    // 채팅방 목록을 다시 요청하여 시스템 채팅방이 목록에 추가되도록 함
                     chatClient.getChatRooms();
-                    // 이 메시지는 (팝업창 없이) 로그로만 남깁니다.
                 }
             }
         });
@@ -524,7 +499,6 @@ public class ChatClientGUI extends JFrame {
         }
     }
 
-    // MESSAGE_MARKED_AS_NOTICE_SUCCESS 응답 처리
     private void handleMessageMarkedAsNoticeSuccess(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             int messageId = (int) response.getData().get("messageId");
@@ -542,6 +516,29 @@ public class ChatClientGUI extends JFrame {
             }
         });
     }
+
+    // 새롭게 추가: 타임라인 이벤트 삭제 성공 처리
+    private void handleTimelineEventDeletedSuccess(ServerResponse response) {
+        SwingUtilities.invokeLater(() -> {
+            String projectName = (String) response.getData().get("projectName");
+            int deletedCount = (int) response.getData().get("deletedCount");
+            int roomId = (int) response.getData().get("roomId");
+
+            JOptionPane.showMessageDialog(this, "'" + projectName + "' 프로젝트의 타임라인 이벤트 " + deletedCount + "개가 삭제되었습니다.", "삭제 성공", JOptionPane.INFORMATION_MESSAGE);
+
+            // 타임라인 창이 열려있다면 새로고침 (TIMELINE_UPDATE 응답은 ClientHandler에서 이미 보냄)
+            // chatClient.getTimelineEvents(roomId); // ClientHandler에서 이미 TIMELINE_UPDATE 응답을 보내므로 이 호출은 중복될 수 있음.
+            // 하지만 확실하게 업데이트되도록 유지할 수도 있음.
+        });
+    }
+
+    // 새롭게 추가: 타임라인 이벤트 삭제 실패 처리
+    private void handleTimelineEventDeleteFail(ServerResponse response) {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this, "타임라인 이벤트 삭제 실패: " + response.getMessage(), "삭제 실패", JOptionPane.ERROR_MESSAGE);
+        });
+    }
+
 
     private void initNoticeFrame() {
         noticeFrame = new JFrame("공지 사항");
@@ -577,7 +574,6 @@ public class ChatClientGUI extends JFrame {
 
         JPanel mainTimelinePanel = new JPanel(new BorderLayout(10, 0));
 
-        // 좌측 프로젝트 목록 패널
         JPanel projectPanel = new JPanel(new BorderLayout());
         projectPanel.setBorder(new TitledBorder("프로젝트 목록"));
         projectListModel = new DefaultListModel<>();
@@ -590,10 +586,9 @@ public class ChatClientGUI extends JFrame {
         });
         JScrollPane projectScrollPane = new JScrollPane(projectList);
         projectScrollPane.setPreferredSize(new Dimension(150, 0));
-        projectPanel.add(projectScrollPane, BorderLayout.CENTER);
+        projectPanel.add(projectScrollPane, BorderLayout.WEST);
         mainTimelinePanel.add(projectPanel, BorderLayout.WEST);
 
-        // 우측 타임라인 내용 패널
         JPanel contentPanel = new JPanel(new BorderLayout());
         contentPanel.setBorder(new TitledBorder("이벤트 내용"));
         timelineArea = new JTextArea();
@@ -649,10 +644,9 @@ public class ChatClientGUI extends JFrame {
             String displayContent;
             if ("PROJECT_START".equals(event.getEventType())) {
                 displayContent = String.format(
-                        "(%s) 프로젝트 시작 : %s _%s",
+                        "(%s) %s",
                         event.getEventTime().format(formatter),
-                        event.getDescription(),
-                        event.getSenderNickname()
+                        event.getDescription()
                 );
             } else {
                 displayContent = event.getEventTime().format(formatter) + " " + event.getSenderNickname() + " " + event.getCommand() + ": " + event.getDescription();

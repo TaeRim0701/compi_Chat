@@ -19,7 +19,7 @@ public class TimelineDAO {
      * @param eventName 이벤트 이름 (예: 프로젝트 이름)
      * @return 성공 여부
      */
-    public boolean saveTimelineEvent(int roomId, int userId, String command, String description, String eventType, String eventName) { // 수정된 부분: String String eventName -> String eventName
+    public boolean saveTimelineEvent(int roomId, int userId, String command, String description, String eventType, String eventName) {
         String sql = "INSERT INTO timeline_events (room_id, user_id, command, description, event_type, event_name) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -43,7 +43,6 @@ public class TimelineDAO {
      */
     public List<TimelineEvent> getTimelineEventsInRoom(int roomId) {
         List<TimelineEvent> events = new ArrayList<>();
-        // username 대신 nickname을 가져오도록 쿼리 변경
         String sql = "SELECT te.event_id, te.room_id, te.user_id, u.nickname, te.command, te.description, te.event_time, te.event_type, te.event_name " +
                 "FROM timeline_events te JOIN users u ON te.user_id = u.user_id " +
                 "WHERE te.room_id = ? ORDER BY te.event_time ASC";
@@ -61,12 +60,30 @@ public class TimelineDAO {
                 LocalDateTime eventTime = rs.getTimestamp("event_time").toLocalDateTime();
                 String eventType = rs.getString("event_type");
                 String eventName = rs.getString("event_name");
-                // TimelineEvent 생성자에 nickname 전달
                 events.add(new TimelineEvent(eventId, rId, uId, nickname, command, description, eventTime, eventType, eventName));
             }
         } catch (SQLException e) {
             System.err.println("Error getting timeline events: " + e.getMessage());
         }
         return events;
+    }
+
+    /**
+     * 특정 채팅방에서 특정 프로젝트 이름에 해당하는 모든 타임라인 이벤트를 삭제합니다.
+     * @param roomId 채팅방 ID
+     * @param projectName 삭제할 프로젝트 이름
+     * @return 삭제된 행의 수
+     */
+    public int deleteTimelineEventsByProjectName(int roomId, String projectName) {
+        String sql = "DELETE FROM timeline_events WHERE room_id = ? AND event_name = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, roomId);
+            pstmt.setString(2, projectName);
+            return pstmt.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("Error deleting timeline events by project name: " + e.getMessage());
+            return 0;
+        }
     }
 }

@@ -251,31 +251,6 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                if (messageContent.startsWith("/s ")) {
-                    String[] parts = messageContent.substring(3).split(" ", 2);
-                    if (parts.length >= 2) {
-                        String projectName = parts[0];
-                        String projectDescription = parts[1];
-                        String command = "/s";
-                        String description = "프로젝트 시작: " + sender.getNickname() + " - " + projectDescription;
-
-                        timelineDAO.saveTimelineEvent(currentRoomId, this.userId, command, description, "PROJECT_START", projectName);
-
-                        Message projectStartMessage = new Message(currentRoomId, this.userId, sender.getNickname(), MessageType.COMMAND, "프로젝트 시작: " + projectName + " - " + projectDescription, false);
-                        server.broadcastMessageToRoom(projectStartMessage, this.userId);
-
-                        server.notifyRoomParticipantsOfRoomUpdate(currentRoomId);
-
-                        response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "프로젝트 타임라인 이벤트가 추가되었습니다.", null);
-                        sendResponse(response);
-                        break;
-                    } else {
-                        response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "프로젝트 시작 명령어 형식이 올바르지 않습니다. (/s 프로젝트이름 내용)", null);
-                        sendResponse(response);
-                        break;
-                    }
-                }
-
                 Message newMessage = new Message(currentRoomId, this.userId, sender.getNickname(), messageType, messageContent, isNotice);
                 server.broadcastMessageToRoom(newMessage, this.userId);
                 break;
@@ -296,25 +271,69 @@ public class ClientHandler implements Runnable {
                 String eventType = (String) request.getData().get("eventType");
                 String eventName = (String) request.getData().get("eventName");
 
-                if (timelineDAO.saveTimelineEvent(timelineRoomId, this.userId, command, description, eventType, eventName)) {
+                User eventSender = userDAO.getUserByUserId(this.userId);
+                if (eventSender == null) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "이벤트 생성자 정보를 찾을 수 없습니다.", null);
+                    sendResponse(response);
+                    break;
+                }
+
+                String finalDescription = String.format("%s 시작 / %s", eventName, eventSender.getNickname());
+
+                if (timelineDAO.saveTimelineEvent(timelineRoomId, this.userId, command, finalDescription, eventType, eventName)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Timeline event added successfully", null);
-                    // 타임라인 이벤트 추가 후, 해당 채팅방의 타임라인을 새로고침하도록 클라이언트에게 알림
                     List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(timelineRoomId);
                     Map<String, Object> timelineData = new HashMap<>();
                     timelineData.put("roomId", timelineRoomId);
                     timelineData.put("timelineEvents", updatedTimelineEvents);
                     sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated", timelineData));
+
+                    String chatMessageContent = String.format("'%s' 프로젝트가 시작되었습니다.", eventName);
+                    Message projectStartChatMessage = new Message(timelineRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, chatMessageContent, false);
+                    server.broadcastMessageToRoom(projectStartChatMessage, server.getSystemUserId());
+
                 } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to add timeline event", null);
                 }
                 sendResponse(response);
                 break;
 
+            case DELETE_TIMELINE_EVENT: // 새롭게 추가: 타임라인 이벤트 삭제 처리
+                int delRoomId = (int) request.getData().get("roomId");
+                String delProjectName = (String) request.getData().get("projectName");
+
+                int deletedRows = timelineDAO.deleteTimelineEventsByProjectName(delRoomId, delProjectName);
+
+                if (deletedRows > 0) {
+                    responseData.put("roomId", delRoomId);
+                    responseData.put("projectName", delProjectName);
+                    responseData.put("deletedCount", deletedRows);
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, true, deletedRows + "개의 타임라인 이벤트가 삭제되었습니다.", responseData);
+                    sendResponse(response);
+
+                    // 타임라인 업데이트를 위해 클라이언트에 다시 요청
+                    List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(delRoomId);
+                    Map<String, Object> timelineData = new HashMap<>();
+                    timelineData.put("roomId", delRoomId);
+                    timelineData.put("timelineEvents", updatedTimelineEvents);
+                    sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated after deletion", timelineData));
+
+                    // 채팅방에 시스템 메시지 전송
+                    String chatMessageContent = String.format("'%s' 프로젝트 타임라인이 삭제되었습니다.", delProjectName);
+                    Message projectDeleteChatMessage = new Message(delRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, chatMessageContent, false);
+                    server.broadcastMessageToRoom(projectDeleteChatMessage, server.getSystemUserId());
+
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, false, "프로젝트 '" + delProjectName + "'에 해당하는 타임라인 이벤트를 찾을 수 없거나 삭제에 실패했습니다.", null);
+                    sendResponse(response);
+                }
+                break;
+
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");
                 int readStatus = messageDAO.markMessageAsReadStatus(messageIdToRead, this.userId);
 
-                if (readStatus == 1) { // 성공적으로 읽음 처리된 경우
+                if (readStatus == 1) {
                     responseData.put("messageId", messageIdToRead);
                     response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, true, "Message marked as read", responseData);
                     sendResponse(response);
@@ -322,11 +341,11 @@ public class ClientHandler implements Runnable {
                     if (readMsg != null) {
                         server.updateUnreadCountsForRoom(readMsg.getRoomId());
                     }
-                } else if (readStatus == 0) { // 이미 읽음 처리된 메시지인 경우
+                } else if (readStatus == 0) {
                     responseData.put("messageId", messageIdToRead);
                     response = new ServerResponse(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, true, "Message was already marked as read", responseData);
                     sendResponse(response);
-                } else { // DB 오류 등으로 실패한 경우 (readStatus == -1)
+                } else {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Failed to mark message as read due to DB error", null);
                     sendResponse(response);
                 }

@@ -236,7 +236,7 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.GET_UNREAD_SYSTEM_NOTIFICATIONS, null));
     }
 
-    public void addTimelineEvent(int roomId, String command, String description, String eventType, String eventName) { // <-- 새로운 메서드 추가
+    public void addTimelineEvent(int roomId, String command, String description, String eventType, String eventName) {
         Map<String, Object> data = new HashMap<>();
         data.put("roomId", roomId);
         data.put("command", command);
@@ -244,5 +244,13 @@ public class ChatClient {
         data.put("eventType", eventType);
         data.put("eventName", eventName);
         sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_TIMELINE_EVENT, data));
+    }
+
+    // 새롭게 추가: 타임라인 이벤트 삭제 요청 메서드
+    public void deleteTimelineEvent(int roomId, String projectName) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId);
+        data.put("projectName", projectName);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.DELETE_TIMELINE_EVENT, data));
     }
 }

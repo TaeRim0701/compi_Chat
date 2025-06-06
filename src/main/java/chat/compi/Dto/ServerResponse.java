@@ -16,7 +16,8 @@ public class ServerResponse implements Serializable {
         FILE_UPLOAD_SUCCESS, FILE_DOWNLOAD_SUCCESS,
         SYSTEM_NOTIFICATION,
         MESSAGE_MARKED_AS_NOTICE_SUCCESS,
-        MESSAGE_ALREADY_READ
+        MESSAGE_ALREADY_READ,
+        TIMELINE_EVENT_DELETED_SUCCESS, TIMELINE_EVENT_DELETE_FAIL
     }
 
     private ResponseType type;

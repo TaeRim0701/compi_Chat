@@ -111,8 +111,8 @@ public class ChatRoomDialog extends JDialog {
 
                         renotifyItem.addActionListener(ev -> {
                             Map<String, Object> data = new HashMap<>();
-                            data.put("roomId", chatRoom.getRoomId()); // 현재 채팅방 ID 전달
-                            data.put("messageId", finalMessageId); // 재알림을 요청하는 메시지 ID 전달
+                            data.put("roomId", chatRoom.getRoomId());
+                            data.put("messageId", finalMessageId);
                             chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.RESEND_NOTIFICATION, data));
                             JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 요청을 서버로 보냈습니다.", "재알림", JOptionPane.INFORMATION_MESSAGE);
                         });
@@ -235,19 +235,42 @@ public class ChatRoomDialog extends JDialog {
             messageInput.setText("");
             return;
         }
-        // "/del (프로젝트 이름)" 명령어 처리 추가
         else if (content.startsWith("/del ")) {
-            String projectNameToDelete = content.substring(5).trim(); // "/del " 이후의 모든 내용
+            String projectNameToDelete = content.substring(5).trim();
             if (projectNameToDelete.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "삭제할 프로젝트 이름을 입력해주세요.\n예시: /del 삭제할 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 messageInput.setText("");
                 return;
             }
-            // 서버로 삭제 요청 전송
             chatClient.deleteTimelineEvent(chatRoom.getRoomId(), projectNameToDelete);
             messageInput.setText("");
             return;
         }
+        // "/c (프로젝트 이름)/(내용)" 명령어 처리 추가
+        else if (content.startsWith("/c ")) {
+            String commandArgs = content.substring(3).trim(); // "/c " 이후의 문자열
+            int separatorIndex = commandArgs.indexOf("/"); // '/' 기준으로 분리
+
+            if (separatorIndex == -1 || separatorIndex == 0 || separatorIndex == commandArgs.length() - 1) {
+                JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 '/'로 구분하여 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                messageInput.setText("");
+                return;
+            }
+
+            String projectName = commandArgs.substring(0, separatorIndex).trim();
+            String projectContent = commandArgs.substring(separatorIndex + 1).trim();
+
+            if (projectName.isEmpty() || projectContent.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 모두 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                messageInput.setText("");
+                return;
+            }
+
+            chatClient.addProjectContentToTimeline(chatRoom.getRoomId(), projectName, projectContent);
+            messageInput.setText("");
+            return;
+        }
+
 
         // 기존 메시지 전송 로직
         MessageType type = MessageType.TEXT;

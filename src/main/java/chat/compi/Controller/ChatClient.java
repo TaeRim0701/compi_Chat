@@ -200,9 +200,9 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.INVITE_USER_TO_ROOM, data));
     }
 
-    public void getNoticeMessages(int roomId) { // roomId 파라미터 추가
+    public void getNoticeMessages(int roomId) {
         Map<String, Object> data = new HashMap<>();
-        data.put("roomId", roomId); // roomId를 요청 데이터에 추가
+        data.put("roomId", roomId);
         sendRequest(new ClientRequest(ClientRequest.RequestType.GET_NOTICE_MESSAGES, data));
     }
 
@@ -246,11 +246,19 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_TIMELINE_EVENT, data));
     }
 
-    // 새롭게 추가: 타임라인 이벤트 삭제 요청 메서드
     public void deleteTimelineEvent(int roomId, String projectName) {
         Map<String, Object> data = new HashMap<>();
         data.put("roomId", roomId);
         data.put("projectName", projectName);
         sendRequest(new ClientRequest(ClientRequest.RequestType.DELETE_TIMELINE_EVENT, data));
+    }
+
+    // 새롭게 추가: 프로젝트 타임라인에 내용 추가 요청 메서드
+    public void addProjectContentToTimeline(int roomId, String projectName, String content) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId);
+        data.put("projectName", projectName);
+        data.put("content", content);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_PROJECT_CONTENT_TO_TIMELINE, data));
     }
 }

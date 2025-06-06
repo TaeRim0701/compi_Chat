@@ -49,13 +49,10 @@ public class ChatClientGUI extends JFrame {
     private JTextArea noticeArea;
     private JFrame timelineFrame;
     private JTextArea timelineArea;
-    // 미열람 알림 팝업창 관련 필드 삭제
-    // private JFrame unreadNotificationFrame;
-    // private JTextArea unreadNotificationArea;
 
-    private JList<String> projectList; // 프로젝트 이름 목록
+    private JList<String> projectList;
     private DefaultListModel<String> projectListModel;
-    private List<TimelineEvent> allTimelineEvents; // 현재 로드된 모든 타임라인 이벤트
+    private List<TimelineEvent> allTimelineEvents;
 
     public JFrame getNoticeFrame() {
         return noticeFrame;
@@ -124,8 +121,8 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_MARKED_AS_NOTICE_SUCCESS, this::handleMessageMarkedAsNoticeSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_READ_CONFIRM, this::handleMessageReadConfirm);
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, this::handleMessageAlreadyRead);
-        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, this::handleTimelineEventDeletedSuccess); // 추가
-        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, this::handleTimelineEventDeleteFail); // 추가
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, this::handleTimelineEventDeletedSuccess);
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, this::handleTimelineEventDeleteFail);
     }
 
     private void initComponents() {
@@ -144,7 +141,6 @@ public class ChatClientGUI extends JFrame {
 
         JPanel centerPanel = new JPanel(new GridLayout(1, 2, 10, 0));
 
-        // 좌측: 친구 목록
         JPanel friendPanel = new JPanel(new BorderLayout());
         friendPanel.setBorder(new TitledBorder("친구 목록"));
         friendListModel = new DefaultListModel<>();
@@ -245,7 +241,6 @@ public class ChatClientGUI extends JFrame {
         System.out.println("Opened chat room dialog for room ID: " + room.getRoomId() + " (" + room.getRoomName() + ")");
     }
 
-
     private void handleFriendListUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             List<User> friends = (List<User>) response.getData().get("friends");
@@ -297,7 +292,6 @@ public class ChatClientGUI extends JFrame {
         pendingPrivateChatUserId = -1;
         System.out.println("  pendingPrivateChatUserId reset to: " + pendingPrivateChatUserId);
     }
-
 
     private void handleChatRoomsUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
@@ -400,7 +394,6 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
-
     private void handleServerFailure(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             JOptionPane.showMessageDialog(this, "서버 오류: " + response.getMessage(), "오류", JOptionPane.ERROR_MESSAGE);
@@ -496,6 +489,9 @@ public class ChatClientGUI extends JFrame {
             handleChatRoomCreationSuccessLogic(response);
         } else if ("Friend added successfully".equals(response.getMessage())) {
             SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "친구가 추가되었습니다.", "성공", JOptionPane.INFORMATION_MESSAGE));
+        } else if (response.getMessage().equals("프로젝트 타임라인에 내용이 추가되었습니다.")) { // ADD_PROJECT_CONTENT_TO_TIMELINE 성공 응답 처리
+            // 별도의 팝업 메시지 없이, 타임라인이 자동으로 업데이트되므로 이 부분은 필요 없을 수 있음.
+            // 필요하다면 JOptionPane.showMessageDialog(this, response.getMessage(), "성공", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
@@ -517,7 +513,6 @@ public class ChatClientGUI extends JFrame {
         });
     }
 
-    // 새롭게 추가: 타임라인 이벤트 삭제 성공 처리
     private void handleTimelineEventDeletedSuccess(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             String projectName = (String) response.getData().get("projectName");
@@ -525,14 +520,10 @@ public class ChatClientGUI extends JFrame {
             int roomId = (int) response.getData().get("roomId");
 
             JOptionPane.showMessageDialog(this, "'" + projectName + "' 프로젝트의 타임라인 이벤트 " + deletedCount + "개가 삭제되었습니다.", "삭제 성공", JOptionPane.INFORMATION_MESSAGE);
-
-            // 타임라인 창이 열려있다면 새로고침 (TIMELINE_UPDATE 응답은 ClientHandler에서 이미 보냄)
-            // chatClient.getTimelineEvents(roomId); // ClientHandler에서 이미 TIMELINE_UPDATE 응답을 보내므로 이 호출은 중복될 수 있음.
-            // 하지만 확실하게 업데이트되도록 유지할 수도 있음.
+            // ClientHandler에서 TIMELINE_UPDATE 응답을 이미 보내므로, 여기서는 별도의 getTimelineEvents 호출 없이 UI가 업데이트될 것임.
         });
     }
 
-    // 새롭게 추가: 타임라인 이벤트 삭제 실패 처리
     private void handleTimelineEventDeleteFail(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             JOptionPane.showMessageDialog(this, "타임라인 이벤트 삭제 실패: " + response.getMessage(), "삭제 실패", JOptionPane.ERROR_MESSAGE);
@@ -607,7 +598,9 @@ public class ChatClientGUI extends JFrame {
 
         Set<String> projectNames = new TreeSet<>();
         for (TimelineEvent event : events) {
-            if ("PROJECT_START".equals(event.getEventType()) && event.getEventName() != null && !event.getEventName().isEmpty()) {
+            // "PROJECT_START" 및 "PROJECT_CONTENT" 모두 프로젝트 목록에 포함
+            if (("PROJECT_START".equals(event.getEventType()) || "PROJECT_CONTENT".equals(event.getEventType()))
+                    && event.getEventName() != null && !event.getEventName().isEmpty()) {
                 projectNames.add(event.getEventName());
             }
         }
@@ -648,7 +641,14 @@ public class ChatClientGUI extends JFrame {
                         event.getEventTime().format(formatter),
                         event.getDescription()
                 );
-            } else {
+            } else if ("PROJECT_CONTENT".equals(event.getEventType())) { // 새롭게 추가: PROJECT_CONTENT 타입 처리
+                displayContent = String.format(
+                        "(%s) %s", // (시간) (내용) / (닉네임)
+                        event.getEventTime().format(formatter),
+                        event.getDescription()
+                );
+            }
+            else {
                 displayContent = event.getEventTime().format(formatter) + " " + event.getSenderNickname() + " " + event.getCommand() + ": " + event.getDescription();
             }
             timelineArea.append(displayContent + "\n\n");

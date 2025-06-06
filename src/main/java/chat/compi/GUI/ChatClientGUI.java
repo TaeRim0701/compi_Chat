@@ -489,9 +489,10 @@ public class ChatClientGUI extends JFrame {
             handleChatRoomCreationSuccessLogic(response);
         } else if ("Friend added successfully".equals(response.getMessage())) {
             SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "친구가 추가되었습니다.", "성공", JOptionPane.INFORMATION_MESSAGE));
-        } else if (response.getMessage().equals("프로젝트 타임라인에 내용이 추가되었습니다.")) { // ADD_PROJECT_CONTENT_TO_TIMELINE 성공 응답 처리
-            // 별도의 팝업 메시지 없이, 타임라인이 자동으로 업데이트되므로 이 부분은 필요 없을 수 있음.
-            // 필요하다면 JOptionPane.showMessageDialog(this, response.getMessage(), "성공", JOptionPane.INFORMATION_MESSAGE);
+        } else if (response.getMessage().equals("프로젝트 타임라인에 내용이 추가되었습니다.")) {
+            // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
+        } else if (response.getMessage().equals("프로젝트가 종료되었습니다.")) { // 프로젝트 종료 성공 응답 처리
+            // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
         }
     }
 
@@ -520,7 +521,6 @@ public class ChatClientGUI extends JFrame {
             int roomId = (int) response.getData().get("roomId");
 
             JOptionPane.showMessageDialog(this, "'" + projectName + "' 프로젝트의 타임라인 이벤트 " + deletedCount + "개가 삭제되었습니다.", "삭제 성공", JOptionPane.INFORMATION_MESSAGE);
-            // ClientHandler에서 TIMELINE_UPDATE 응답을 이미 보내므로, 여기서는 별도의 getTimelineEvents 호출 없이 UI가 업데이트될 것임.
         });
     }
 
@@ -598,8 +598,7 @@ public class ChatClientGUI extends JFrame {
 
         Set<String> projectNames = new TreeSet<>();
         for (TimelineEvent event : events) {
-            // "PROJECT_START" 및 "PROJECT_CONTENT" 모두 프로젝트 목록에 포함
-            if (("PROJECT_START".equals(event.getEventType()) || "PROJECT_CONTENT".equals(event.getEventType()))
+            if (("PROJECT_START".equals(event.getEventType()) || "PROJECT_CONTENT".equals(event.getEventType()) || "PROJECT_END".equals(event.getEventType()))
                     && event.getEventName() != null && !event.getEventName().isEmpty()) {
                 projectNames.add(event.getEventName());
             }
@@ -641,9 +640,15 @@ public class ChatClientGUI extends JFrame {
                         event.getEventTime().format(formatter),
                         event.getDescription()
                 );
-            } else if ("PROJECT_CONTENT".equals(event.getEventType())) { // 새롭게 추가: PROJECT_CONTENT 타입 처리
+            } else if ("PROJECT_CONTENT".equals(event.getEventType())) {
                 displayContent = String.format(
-                        "(%s) %s", // (시간) (내용) / (닉네임)
+                        "(%s) %s",
+                        event.getEventTime().format(formatter),
+                        event.getDescription()
+                );
+            } else if ("PROJECT_END".equals(event.getEventType())) { // 새롭게 추가: PROJECT_END 타입 처리
+                displayContent = String.format(
+                        "(%s) %s",
                         event.getEventTime().format(formatter),
                         event.getDescription()
                 );

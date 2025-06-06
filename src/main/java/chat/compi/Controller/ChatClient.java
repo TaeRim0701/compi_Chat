@@ -253,12 +253,19 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.DELETE_TIMELINE_EVENT, data));
     }
 
-    // 새롭게 추가: 프로젝트 타임라인에 내용 추가 요청 메서드
     public void addProjectContentToTimeline(int roomId, String projectName, String content) {
         Map<String, Object> data = new HashMap<>();
         data.put("roomId", roomId);
         data.put("projectName", projectName);
         data.put("content", content);
         sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_PROJECT_CONTENT_TO_TIMELINE, data));
+    }
+
+    // 새롭게 추가: 프로젝트 종료 이벤트 요청 메서드
+    public void endProjectToTimeline(int roomId, String projectName) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("roomId", roomId);
+        data.put("projectName", projectName);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.END_PROJECT_TO_TIMELINE, data));
     }
 }

@@ -17,7 +17,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.LocalDateTime; // LocalDateTime 임포트 추가
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -262,9 +262,9 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-            case ADD_TIMELINE_EVENT:
+            case ADD_TIMELINE_EVENT: // PROJECT_START 이벤트
                 int timelineRoomId = (int) request.getData().get("roomId");
-                String command = (String) request.getData().get("command");
+                String command = (String) request.getData().get("command"); // "/s"
                 String description = (String) request.getData().get("description"); // "프로젝트 시작" (고정)
                 String eventType = (String) request.getData().get("eventType"); // "PROJECT_START"
                 String eventName = (String) request.getData().get("eventName"); // (프로젝트 이름)
@@ -276,6 +276,7 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
+                // 타임라인에 기록될 실제 description: "(프로젝트 이름) 시작 / (닉네임)"
                 String finalDescription = String.format("%s 시작 / %s", eventName, eventSender.getNickname());
 
                 if (timelineDAO.saveTimelineEvent(timelineRoomId, this.userId, command, finalDescription, eventType, eventName)) {
@@ -325,7 +326,7 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
-            case ADD_PROJECT_CONTENT_TO_TIMELINE: // 새롭게 추가: 프로젝트 타임라인 내용 추가 처리
+            case ADD_PROJECT_CONTENT_TO_TIMELINE: // PROJECT_CONTENT 이벤트
                 int contentRoomId = (int) request.getData().get("roomId");
                 String contentProjectName = (String) request.getData().get("projectName");
                 String contentMessage = (String) request.getData().get("content");
@@ -340,17 +341,14 @@ public class ClientHandler implements Runnable {
                 // 타임라인에 기록될 description 형식: "(내용) / (닉네임)"
                 String contentDescription = String.format("%s / %s", contentMessage, contentSender.getNickname());
 
-                // TimelineDAO.saveTimelineEvent 호출 (command는 "/c", eventType은 "PROJECT_CONTENT"로 설정)
                 if (timelineDAO.saveTimelineEvent(contentRoomId, this.userId, "/c", contentDescription, "PROJECT_CONTENT", contentProjectName)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "프로젝트 타임라인에 내용이 추가되었습니다.", null);
-                    // 타임라인 업데이트를 위해 클라이언트에 다시 요청
                     List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(contentRoomId);
                     Map<String, Object> timelineData = new HashMap<>();
                     timelineData.put("roomId", contentRoomId);
                     timelineData.put("timelineEvents", updatedTimelineEvents);
                     sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated with new project content", timelineData));
 
-                    // 채팅방에 시스템 메시지 전송
                     String chatMessageContent = String.format("'%s' 프로젝트에 새 내용이 추가되었습니다.", contentProjectName);
                     Message projectContentChatMessage = new Message(contentRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, chatMessageContent, false);
                     server.broadcastMessageToRoom(projectContentChatMessage, server.getSystemUserId());
@@ -360,6 +358,40 @@ public class ClientHandler implements Runnable {
                 }
                 sendResponse(response);
                 break;
+
+            case END_PROJECT_TO_TIMELINE: // 새롭게 추가: 프로젝트 종료 이벤트 처리
+                int endRoomId = (int) request.getData().get("roomId");
+                String endProjectName = (String) request.getData().get("projectName");
+
+                User endSender = userDAO.getUserByUserId(this.userId);
+                if (endSender == null) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "이벤트 생성자 정보를 찾을 수 없습니다.", null);
+                    sendResponse(response);
+                    break;
+                }
+
+                // 타임라인에 기록될 description 형식: "(프로젝트 이름) 종료 / (닉네임)"
+                String endDescription = String.format("%s 종료 / %s", endProjectName, endSender.getNickname());
+
+                if (timelineDAO.saveTimelineEvent(endRoomId, this.userId, "/d", endDescription, "PROJECT_END", endProjectName)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "프로젝트가 종료되었습니다.", null);
+                    List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(endRoomId);
+                    Map<String, Object> timelineData = new HashMap<>();
+                    timelineData.put("roomId", endRoomId);
+                    timelineData.put("timelineEvents", updatedTimelineEvents);
+                    sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated with project end event", timelineData));
+
+                    // 채팅방에 시스템 메시지 전송
+                    String chatMessageContent = String.format("'%s' 프로젝트가 종료되었습니다.", endProjectName);
+                    Message projectEndChatMessage = new Message(endRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, chatMessageContent, false);
+                    server.broadcastMessageToRoom(projectEndChatMessage, server.getSystemUserId());
+
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "프로젝트 종료 이벤트를 추가하는 데 실패했습니다.", null);
+                }
+                sendResponse(response);
+                break;
+
 
             case READ_MESSAGE:
                 int messageIdToRead = (int) request.getData().get("messageId");

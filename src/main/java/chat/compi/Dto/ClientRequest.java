@@ -18,7 +18,8 @@ public class ClientRequest implements Serializable {
         MARK_AS_NOTICE, RESEND_NOTIFICATION,
         GET_UNREAD_SYSTEM_NOTIFICATIONS,
         ADD_TIMELINE_EVENT, DELETE_TIMELINE_EVENT,
-        ADD_PROJECT_CONTENT_TO_TIMELINE
+        ADD_PROJECT_CONTENT_TO_TIMELINE,
+        END_PROJECT_TO_TIMELINE
     }
 
     private RequestType type;

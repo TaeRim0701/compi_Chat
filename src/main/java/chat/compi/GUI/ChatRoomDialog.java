@@ -246,10 +246,9 @@ public class ChatRoomDialog extends JDialog {
             messageInput.setText("");
             return;
         }
-        // "/c (프로젝트 이름)/(내용)" 명령어 처리 추가
         else if (content.startsWith("/c ")) {
-            String commandArgs = content.substring(3).trim(); // "/c " 이후의 문자열
-            int separatorIndex = commandArgs.indexOf("/"); // '/' 기준으로 분리
+            String commandArgs = content.substring(3).trim();
+            int separatorIndex = commandArgs.indexOf("/");
 
             if (separatorIndex == -1 || separatorIndex == 0 || separatorIndex == commandArgs.length() - 1) {
                 JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 '/'로 구분하여 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -267,6 +266,18 @@ public class ChatRoomDialog extends JDialog {
             }
 
             chatClient.addProjectContentToTimeline(chatRoom.getRoomId(), projectName, projectContent);
+            messageInput.setText("");
+            return;
+        }
+        // "/d (프로젝트 이름)" 명령어 처리 추가
+        else if (content.startsWith("/d ")) {
+            String projectNameToEnd = content.substring(3).trim();
+            if (projectNameToEnd.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "종료할 프로젝트 이름을 입력해주세요.\n예시: /d 나의 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                messageInput.setText("");
+                return;
+            }
+            chatClient.endProjectToTimeline(chatRoom.getRoomId(), projectNameToEnd);
             messageInput.setText("");
             return;
         }

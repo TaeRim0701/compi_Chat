@@ -301,6 +301,13 @@ public class ClientHandler implements Runnable {
                 int delRoomId = (int) request.getData().get("roomId");
                 String delProjectName = (String) request.getData().get("projectName");
 
+                // 프로젝트 존재 여부 확인
+                if (!timelineDAO.isProjectNameExist(delRoomId, delProjectName)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, false, "현재 존재하지 않는 프로젝트입니다.", null);
+                    sendResponse(response);
+                    break;
+                }
+
                 int deletedRows = timelineDAO.deleteTimelineEventsByProjectName(delRoomId, delProjectName);
 
                 if (deletedRows > 0) {
@@ -326,10 +333,17 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
-            case ADD_PROJECT_CONTENT_TO_TIMELINE: // PROJECT_CONTENT 이벤트
+            case ADD_PROJECT_CONTENT_TO_TIMELINE:
                 int contentRoomId = (int) request.getData().get("roomId");
                 String contentProjectName = (String) request.getData().get("projectName");
                 String contentMessage = (String) request.getData().get("content");
+
+                // 프로젝트 존재 여부 확인
+                if (!timelineDAO.isProjectNameExist(contentRoomId, contentProjectName)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "현재 존재하지 않는 프로젝트입니다.", null);
+                    sendResponse(response);
+                    break;
+                }
 
                 User contentSender = userDAO.getUserByUserId(this.userId);
                 if (contentSender == null) {
@@ -338,7 +352,6 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                // 타임라인에 기록될 description 형식: "(내용) / (닉네임)"
                 String contentDescription = String.format("%s / %s", contentMessage, contentSender.getNickname());
 
                 if (timelineDAO.saveTimelineEvent(contentRoomId, this.userId, "/c", contentDescription, "PROJECT_CONTENT", contentProjectName)) {
@@ -359,9 +372,16 @@ public class ClientHandler implements Runnable {
                 sendResponse(response);
                 break;
 
-            case END_PROJECT_TO_TIMELINE: // 새롭게 추가: 프로젝트 종료 이벤트 처리
+            case END_PROJECT_TO_TIMELINE: // PROJECT_END 이벤트
                 int endRoomId = (int) request.getData().get("roomId");
                 String endProjectName = (String) request.getData().get("projectName");
+
+                // 프로젝트 존재 여부 확인
+                if (!timelineDAO.isProjectNameExist(endRoomId, endProjectName)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "현재 존재하지 않는 프로젝트입니다.", null);
+                    sendResponse(response);
+                    break;
+                }
 
                 User endSender = userDAO.getUserByUserId(this.userId);
                 if (endSender == null) {
@@ -370,7 +390,6 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                // 타임라인에 기록될 description 형식: "(프로젝트 이름) 종료 / (닉네임)"
                 String endDescription = String.format("%s 종료 / %s", endProjectName, endSender.getNickname());
 
                 if (timelineDAO.saveTimelineEvent(endRoomId, this.userId, "/d", endDescription, "PROJECT_END", endProjectName)) {
@@ -381,7 +400,6 @@ public class ClientHandler implements Runnable {
                     timelineData.put("timelineEvents", updatedTimelineEvents);
                     sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated with project end event", timelineData));
 
-                    // 채팅방에 시스템 메시지 전송
                     String chatMessageContent = String.format("'%s' 프로젝트가 종료되었습니다.", endProjectName);
                     Message projectEndChatMessage = new Message(endRoomId, server.getSystemUserId(), "시스템", MessageType.SYSTEM, chatMessageContent, false);
                     server.broadcastMessageToRoom(projectEndChatMessage, server.getSystemUserId());

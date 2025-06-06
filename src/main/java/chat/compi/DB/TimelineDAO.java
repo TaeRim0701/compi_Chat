@@ -86,4 +86,27 @@ public class TimelineDAO {
             return 0;
         }
     }
+
+    /**
+     * 특정 채팅방에 지정된 프로젝트 이름의 PROJECT_START 이벤트가 존재하는지 확인합니다.
+     * 이는 해당 프로젝트가 유효하게 "시작"되었는지 확인하는 용도입니다.
+     * @param roomId 채팅방 ID
+     * @param projectName 확인할 프로젝트 이름
+     * @return 프로젝트가 존재하면 true, 아니면 false
+     */
+    public boolean isProjectNameExist(int roomId, String projectName) {
+        String sql = "SELECT COUNT(*) FROM timeline_events WHERE room_id = ? AND event_name = ? AND event_type = 'PROJECT_START'";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, roomId);
+            pstmt.setString(2, projectName);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            System.err.println("Error checking project name existence: " + e.getMessage());
+        }
+        return false;
+    }
 }

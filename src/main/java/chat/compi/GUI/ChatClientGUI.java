@@ -26,7 +26,7 @@ import java.awt.event.MouseEvent;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.BadLocationException;
-import javax.swing.event.HyperlinkEvent; // HyperlinkEvent 임포트 추가
+import javax.swing.event.HyperlinkEvent;
 
 @SuppressWarnings("unchecked")
 public class ChatClientGUI extends JFrame {
@@ -54,9 +54,9 @@ public class ChatClientGUI extends JFrame {
 
     // 별도 창들
     private JFrame noticeFrame;
-    private JEditorPane noticeArea; // JTextArea -> JEditorPane으로 변경
-    private HTMLEditorKit noticeEditorKit; // 추가
-    private HTMLDocument noticeDoc; // 추가
+    private JEditorPane noticeArea;
+    private HTMLEditorKit noticeEditorKit;
+    private HTMLDocument noticeDoc;
 
     private JFrame timelineFrame;
     private JTextArea timelineArea;
@@ -65,7 +65,7 @@ public class ChatClientGUI extends JFrame {
     private DefaultListModel<String> projectListModel;
     private List<TimelineEvent> allTimelineEvents;
 
-    // 공지사항 메시지 리스트를 저장하는 필드 추가
+    // 공지사항 메시지 리스트를 저장하는 필드
     private List<Message> currentNoticeMessages;
 
     public JFrame getNoticeFrame() {
@@ -85,7 +85,7 @@ public class ChatClientGUI extends JFrame {
         setLocationRelativeTo(null);
 
         openChatRoomDialogs = new HashMap<>();
-        currentNoticeMessages = new ArrayList<>(); // 초기화
+        currentNoticeMessages = new ArrayList<>();
 
         addWindowListener(new WindowAdapter() {
             @Override
@@ -258,7 +258,7 @@ public class ChatClientGUI extends JFrame {
         }
         dialog.setVisible(true);
         dialog.toFront();
-        dialog.loadMessages(targetMessageId); // 수정: targetMessageId 전달
+        dialog.loadMessages(targetMessageId);
         System.out.println("Opened chat room dialog for room ID: " + room.getRoomId() + " (" + room.getRoomName() + ")");
     }
 
@@ -380,8 +380,9 @@ public class ChatClientGUI extends JFrame {
                 dialog.appendMessageToChatArea(newMessage);
             } else {
                 System.out.println("New message received for room " + messageRoomId + ", dialog not open. Content: " + newMessage.getContent());
-                chatClient.getChatRooms();
+                chatClient.getChatRooms(); // 채팅방 목록 갱신 요청
                 if (newMessage.getMessageType() == MessageType.SYSTEM) {
+                    // 시스템 메시지일 경우, 해당 시스템 채팅방을 찾아 열려고 시도
                     ChatRoom systemChatRoom = null;
                     for (int i = 0; i < chatRoomListModel.size(); i++) {
                         ChatRoom room = chatRoomListModel.getElementAt(i);
@@ -398,7 +399,7 @@ public class ChatClientGUI extends JFrame {
                 }
             }
             if (newMessage.getMessageType() != MessageType.SYSTEM) {
-                chatClient.getChatRooms();
+                chatClient.getChatRooms(); // 비시스템 메시지일 경우에도 채팅방 목록 갱신
             }
         });
     }
@@ -423,9 +424,22 @@ public class ChatClientGUI extends JFrame {
 
     private void handleNoticeListUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
+            // 서버 응답에 "Expired notices cleared, refresh notice list" 메시지가 오거나
+            // notices 데이터가 null이 아닌 경우 모두 처리.
+            // notices가 null일 수 있는 상황을 대비 (서버가 단순히 refresh 알림만 보낼 경우)
             List<Message> notices = (List<Message>) response.getData().get("noticeMessages");
-            currentNoticeMessages = notices; // 리스트 저장
-            updateNoticeArea(notices);
+
+            // 모든 열려 있는 채팅방 다이얼로그의 공지 목록을 새로고침 요청
+            for (ChatRoomDialog dialog : openChatRoomDialogs.values()) {
+                // dialog.getChatRoomId() 대신 dialog.getChatRoom().getRoomId() 호출
+                chatClient.getNoticeMessages(dialog.getChatRoom().getRoomId()); // 수정된 부분
+            }
+
+            // 공지 프레임이 열려 있다면 업데이트
+            if (noticeFrame.isVisible()) {
+                currentNoticeMessages = notices;
+                updateNoticeArea(notices);
+            }
         });
     }
 
@@ -513,8 +527,15 @@ public class ChatClientGUI extends JFrame {
             SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "친구가 추가되었습니다.", "성공", JOptionPane.INFORMATION_MESSAGE));
         } else if (response.getMessage().equals("프로젝트 타임라인에 내용이 추가되었습니다.")) {
             // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
-        } else if (response.getMessage().equals("프로젝트가 종료되었습니다.")) { // 프로젝트 종료 성공 응답 처리
+        } else if (response.getMessage().equals("프로젝트가 종료되었습니다.")) {
             // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
+        } else if (response.getMessage().contains("expired notices cleared")) { // 만료된 공지 정리 알림
+            // 서버로부터 만료된 공지가 정리되었다는 알림을 받으면,
+            // 열려있는 모든 채팅방의 공지 목록을 새로고침하도록 요청 (getNoticeMessages 호출)
+            // handleNoticeListUpdate에서 실제 GUI 업데이트를 처리함.
+            // 이미 handleNoticeListUpdate에서 전체 열려있는 다이얼로그에 대해 getNoticeMessages를 호출하고 있으므로
+            // 여기서는 특별히 추가적인 로직을 넣지 않아도 됨.
+            System.out.println(response.getMessage());
         }
     }
 
@@ -527,11 +548,13 @@ public class ChatClientGUI extends JFrame {
             String statusText = isNotice ? "공지로 설정되었습니다." : "공지에서 해제되었습니다.";
             JOptionPane.showMessageDialog(this, "메시지가 " + statusText, "알림", JOptionPane.INFORMATION_MESSAGE);
 
+            // 해당 채팅방의 공지 목록을 새로고침
             chatClient.getNoticeMessages(roomId);
 
+            // 채팅방 다이얼로그가 열려 있다면 메시지 상태를 새로고침 (공지 여부 표시 변경)
             ChatRoomDialog dialog = openChatRoomDialogs.get(roomId);
             if (dialog != null) {
-                dialog.loadMessages();
+                dialog.loadMessages(); // 모든 메시지를 다시 로드하여 isNotice 상태 반영
             }
         });
     }
@@ -559,14 +582,12 @@ public class ChatClientGUI extends JFrame {
         noticeFrame.setLocationRelativeTo(this);
         noticeFrame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
 
-        noticeArea = new JEditorPane(); // JTextArea -> JEditorPane으로 변경
-        noticeEditorKit = new HTMLEditorKit(); // 추가
-        noticeArea.setEditorKit(noticeEditorKit); // 추가
-        noticeDoc = (HTMLDocument) noticeArea.getDocument(); // 추가
+        noticeArea = new JEditorPane();
+        noticeEditorKit = new HTMLEditorKit();
+        noticeArea.setEditorKit(noticeEditorKit);
+        noticeDoc = (HTMLDocument) noticeArea.getDocument();
 
         noticeArea.setEditable(false);
-        // noticeArea.setLineWrap(true); // JEditorPane은 HTML 렌더링 시 자동 줄바꿈 지원
-        // noticeArea.setWrapStyleWord(true); // JEditorPane은 HTML 렌더링 시 자동 줄바꿈 지원
 
         JScrollPane scrollPane = new JScrollPane(noticeArea);
         noticeFrame.add(scrollPane);
@@ -593,12 +614,11 @@ public class ChatClientGUI extends JFrame {
                         }
 
                         if (targetRoom != null) {
-                            openChatRoomDialog(targetRoom, messageId); // 새로운 시그니처로 호출
-                            noticeFrame.setVisible(false); // 공지 프레임 숨기기
+                            openChatRoomDialog(targetRoom, messageId);
+                            noticeFrame.setVisible(false);
                         } else {
                             JOptionPane.showMessageDialog(noticeFrame, "해당 공지가 속한 채팅방을 찾을 수 없습니다.", "오류", JOptionPane.ERROR_MESSAGE);
-                            // 또한, 채팅방 목록을 새로고침하여 누락된 채팅방이 있는지 확인할 수 있습니다.
-                            chatClient.getChatRooms();
+                            chatClient.getChatRooms(); // 채팅방 목록 갱신
                         }
 
                     } catch (NumberFormatException | ArrayIndexOutOfBoundsException ex) {
@@ -614,23 +634,28 @@ public class ChatClientGUI extends JFrame {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
         StringBuilder htmlContent = new StringBuilder("<html><body>");
 
-        if (notices.isEmpty()) {
+        if (notices == null || notices.isEmpty()) { // notices가 null일 경우도 처리
             htmlContent.append("<p>공지사항이 없습니다.</p>");
         } else {
             for (Message notice : notices) {
-                // 각 공지 메시지에 고유한 링크를 부여
-                // "notice://[roomId]/[messageId]" 형식의 링크 사용
                 String link = "notice://" + notice.getRoomId() + "/" + notice.getMessageId();
+                // 만료 시간 표시 추가
+                String expiryInfo = "";
+                if (notice.getNoticeExpiryTime() != null) {
+                    expiryInfo = " (만료: " + notice.getNoticeExpiryTime().format(formatter) + ")";
+                }
+
                 htmlContent.append(String.format(
                         "<p style='margin-bottom: 10px;'>" +
-                                "<a href='%s' style='text-decoration: none; color: black;'>" + // 링크 스타일
+                                "<a href='%s' style='text-decoration: none; color: black;'>" +
                                 "<span style='font-size: 0.9em; color: #888;'>[%s] %s: </span>" +
-                                "<span style='font-weight: bold;'>%s</span>" +
+                                "<span style='font-weight: bold;'>%s</span>%s" + // expiryInfo 추가
                                 "</a></p>",
                         link,
                         notice.getSentAt().format(formatter),
                         notice.getSenderNickname(),
-                        notice.getContent()
+                        notice.getContent(),
+                        expiryInfo // 최종 HTML에 추가
                 ));
             }
         }
@@ -638,7 +663,7 @@ public class ChatClientGUI extends JFrame {
 
         SwingUtilities.invokeLater(() -> {
             try {
-                noticeDoc.remove(0, noticeDoc.getLength()); // 기존 내용 삭제
+                noticeDoc.remove(0, noticeDoc.getLength());
                 noticeEditorKit.insertHTML(noticeDoc, noticeDoc.getLength(), htmlContent.toString(), 0, 0, null);
                 noticeArea.setCaretPosition(0);
             } catch (BadLocationException | IOException e) {
@@ -737,7 +762,7 @@ public class ChatClientGUI extends JFrame {
                         event.getEventTime().format(formatter),
                         event.getDescription()
                 );
-            } else if ("PROJECT_END".equals(event.getEventType())) { // 새롭게 추가: PROJECT_END 타입 처리
+            } else if ("PROJECT_END".equals(event.getEventType())) {
                 displayContent = String.format(
                         "(%s) %s",
                         event.getEventTime().format(formatter),

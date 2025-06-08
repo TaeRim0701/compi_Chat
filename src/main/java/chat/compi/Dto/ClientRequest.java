@@ -19,7 +19,8 @@ public class ClientRequest implements Serializable {
         GET_UNREAD_SYSTEM_NOTIFICATIONS,
         ADD_TIMELINE_EVENT, DELETE_TIMELINE_EVENT,
         ADD_PROJECT_CONTENT_TO_TIMELINE,
-        END_PROJECT_TO_TIMELINE
+        END_PROJECT_TO_TIMELINE,
+        CLEAR_EXPIRED_NOTICES
     }
 
     private RequestType type;

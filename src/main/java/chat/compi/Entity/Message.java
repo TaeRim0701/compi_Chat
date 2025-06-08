@@ -1,8 +1,9 @@
+// Message.java
 package chat.compi.Entity;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
-import java.util.List; // List 임포트 추가
+import java.util.List;
 
 public class Message implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -14,8 +15,9 @@ public class Message implements Serializable {
     private String content;
     private LocalDateTime sentAt;
     private boolean isNotice;
-    private int unreadCount; // 기존 미열람자 수 필드는 유지 (필요에 따라 사용)
-    private List<User> readers; // 새로 추가된 필드: 메시지를 읽은 사용자 목록
+    private int unreadCount;
+    private List<User> readers;
+    private LocalDateTime noticeExpiryTime; // 새로 추가: 공지 유효 기간
 
     public Message(int roomId, int senderId, String senderNickname, MessageType messageType, String content, boolean isNotice) {
         this.roomId = roomId;
@@ -39,7 +41,21 @@ public class Message implements Serializable {
         this.isNotice = isNotice;
     }
 
-    // Getters and Setters (기존 필드들)
+    // DB에서 불러올 때 사용하는 생성자 (noticeExpiryTime 포함)
+    public Message(int messageId, int roomId, int senderId, String senderNickname, MessageType messageType, String content, LocalDateTime sentAt, boolean isNotice, LocalDateTime noticeExpiryTime) {
+        this.messageId = messageId;
+        this.roomId = roomId;
+        this.senderId = senderId;
+        this.senderNickname = senderNickname;
+        this.messageType = messageType;
+        this.content = content;
+        this.sentAt = sentAt;
+        this.isNotice = isNotice;
+        this.noticeExpiryTime = noticeExpiryTime; // 초기화
+    }
+
+
+    // Getters and Setters
     public int getMessageId() { return messageId; }
     public void setMessageId(int messageId) { this.messageId = messageId; }
     public int getRoomId() { return roomId; }
@@ -59,13 +75,21 @@ public class Message implements Serializable {
     public int getUnreadCount() { return unreadCount; }
     public void setUnreadCount(int unreadCount) { this.unreadCount = unreadCount; }
 
-    // 새로 추가된 readers 필드의 Getter and Setter
     public List<User> getReaders() {
         return readers;
     }
 
     public void setReaders(List<User> readers) {
         this.readers = readers;
+    }
+
+    // 새로 추가된 noticeExpiryTime 필드의 Getter and Setter
+    public LocalDateTime getNoticeExpiryTime() {
+        return noticeExpiryTime;
+    }
+
+    public void setNoticeExpiryTime(LocalDateTime noticeExpiryTime) {
+        this.noticeExpiryTime = noticeExpiryTime;
     }
 
     @Override

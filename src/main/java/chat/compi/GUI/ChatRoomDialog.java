@@ -24,7 +24,8 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.time.format.DateTimeFormatter;
+import java.time.LocalDateTime; // LocalDateTime 임포트
+import java.time.format.DateTimeFormatter; // DateTimeFormatter 임포트
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,10 @@ public class ChatRoomDialog extends JDialog {
 
     // JScrollPane 인스턴스를 저장하여 스크롤바 상태를 직접 확인
     private JScrollPane chatScrollPane;
+
+    public ChatRoom getChatRoom() {
+        return chatRoom;
+    }
 
     public ChatRoomDialog(JFrame parent, ChatClient client, ChatRoom room) {
         super(parent, room.getRoomName(), false);
@@ -90,10 +95,14 @@ public class ChatRoomDialog extends JDialog {
                     Element element = doc.getCharacterElement(pos);
 
                     Integer messageId = null;
+                    Boolean isMessageNotice = null;
+
                     Element currentElement = element;
-                    while (currentElement != null && messageId == null) {
+                    while (currentElement != null && (messageId == null || isMessageNotice == null)) {
                         AttributeSet attrs = currentElement.getAttributes();
                         String msgIdStr = (String) attrs.getAttribute("data-message-id");
+                        String isNoticeStr = (String) attrs.getAttribute("data-is-notice");
+
                         if (msgIdStr != null) {
                             try {
                                 messageId = Integer.parseInt(msgIdStr);
@@ -101,20 +110,41 @@ public class ChatRoomDialog extends JDialog {
                                 System.err.println("Invalid message ID in HTML: " + msgIdStr);
                             }
                         }
+                        if (isNoticeStr != null) {
+                            isMessageNotice = Boolean.parseBoolean(isNoticeStr);
+                        }
                         currentElement = currentElement.getParentElement();
                     }
 
                     if (messageId != null) {
                         final int finalMessageId = messageId;
+                        final boolean finalIsMessageNotice = (isMessageNotice != null && isMessageNotice);
+
                         JPopupMenu popupMenu = new JPopupMenu();
-                        JMenuItem noticeItem = new JMenuItem("공지");
+                        JMenuItem noticeItem = new JMenuItem("공지 설정");
+                        JMenuItem removeNoticeItem = new JMenuItem("공지 해제");
                         JMenuItem renotifyItem = new JMenuItem("재알림");
 
                         noticeItem.addActionListener(ev -> {
+                            // 부모 프레임(ChatClientGUI)을 가져와서 전달
+                            JFrame parentFrame = (JFrame) SwingUtilities.getWindowAncestor(ChatRoomDialog.this);
+                            LocalDateTime selectedDateTime = showDateTimePickerDialog(parentFrame); // 이 부분을 수정
+                            if (selectedDateTime != null) {
+                                Map<String, Object> data = new HashMap<>();
+                                data.put("messageId", finalMessageId);
+                                data.put("isNotice", true);
+                                data.put("roomId", chatRoom.getRoomId());
+                                data.put("expiryTime", selectedDateTime);
+                                chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
+                            }
+                        });
+
+                        removeNoticeItem.addActionListener(ev -> {
                             Map<String, Object> data = new HashMap<>();
                             data.put("messageId", finalMessageId);
-                            data.put("isNotice", true);
+                            data.put("isNotice", false);
                             data.put("roomId", chatRoom.getRoomId());
+                            data.put("expiryTime", null);
                             chatClient.sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
                         });
 
@@ -126,7 +156,11 @@ public class ChatRoomDialog extends JDialog {
                             JOptionPane.showMessageDialog(ChatRoomDialog.this, "재알림 요청을 서버로 보냈습니다.", "재알림", JOptionPane.INFORMATION_MESSAGE);
                         });
 
+                        removeNoticeItem.setEnabled(finalIsMessageNotice);
+                        noticeItem.setEnabled(!finalIsMessageNotice);
+
                         popupMenu.add(noticeItem);
+                        popupMenu.add(removeNoticeItem);
                         popupMenu.add(renotifyItem);
                         popupMenu.show(e.getComponent(), e.getX(), e.getY());
                     } else {
@@ -136,6 +170,112 @@ public class ChatRoomDialog extends JDialog {
             }
         });
     }
+
+    private JPanel createNumberInputPanel(JTextField textField, int min, int max) {
+        JPanel panel = new JPanel(new BorderLayout());
+        JButton plusButton = new JButton("+");
+        JButton minusButton = new JButton("-");
+
+        plusButton.addActionListener(e -> {
+            try {
+                int val = Integer.parseInt(textField.getText());
+                if (val < max) textField.setText(String.valueOf(val + 1));
+            } catch (NumberFormatException ignored) {}
+        });
+        minusButton.addActionListener(e -> {
+            try {
+                int val = Integer.parseInt(textField.getText());
+                if (val > min) textField.setText(String.valueOf(val - 1));
+            } catch (NumberFormatException ignored) {}
+        });
+
+        panel.add(textField, BorderLayout.CENTER);
+        panel.add(plusButton, BorderLayout.EAST);
+        panel.add(minusButton, BorderLayout.WEST);
+        return panel;
+    }
+
+    // 날짜/시간 선택 다이얼로그 메서드
+    private LocalDateTime showDateTimePickerDialog(JFrame parentFrame) {
+        JDialog dateTimeDialog = new JDialog(parentFrame, "공지 만료 시간 설정", true);
+        dateTimeDialog.setSize(350, 300); // 다이얼로그 크기 조정
+        dateTimeDialog.setLocationRelativeTo(parentFrame);
+        dateTimeDialog.setLayout(new BorderLayout(10, 10)); // 여백 추가
+
+        JPanel inputPanel = new JPanel(new GridBagLayout()); // GridBagLayout 사용
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // 현재 시간으로 필드 초기화
+        LocalDateTime now = LocalDateTime.now();
+        JTextField yearField = new JTextField(String.valueOf(now.getYear()));
+        JTextField monthField = new JTextField(String.valueOf(now.getMonthValue()));
+        JTextField dayField = new JTextField(String.valueOf(now.getDayOfMonth()));
+        JTextField hourField = new JTextField(String.valueOf(now.getHour()));
+        JTextField minuteField = new JTextField(String.valueOf(now.getMinute()));
+
+        // 컴포넌트 추가: 년
+        gbc.gridx = 0; gbc.gridy = 0; inputPanel.add(new JLabel("년:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 0; inputPanel.add(createNumberInputPanel(yearField, now.getYear(), 2100), gbc);
+
+        // 컴포넌트 추가: 월
+        gbc.gridx = 0; gbc.gridy = 1; inputPanel.add(new JLabel("월:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 1; inputPanel.add(createNumberInputPanel(monthField, 1, 12), gbc);
+
+        // 컴포넌트 추가: 일
+        gbc.gridx = 0; gbc.gridy = 2; inputPanel.add(new JLabel("일:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 2; inputPanel.add(createNumberInputPanel(dayField, 1, 31), gbc); // 월별 일수 유효성 검사는 실제 LocalDateTime.of에서 처리
+
+        // 컴포넌트 추가: 시
+        gbc.gridx = 0; gbc.gridy = 3; inputPanel.add(new JLabel("시:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 3; inputPanel.add(createNumberInputPanel(hourField, 0, 23), gbc);
+
+        // 컴포넌트 추가: 분
+        gbc.gridx = 0; gbc.gridy = 4; inputPanel.add(new JLabel("분:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 4; inputPanel.add(createNumberInputPanel(minuteField, 0, 59), gbc);
+
+        dateTimeDialog.add(inputPanel, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton setButton = new JButton("설정");
+        JButton cancelButton = new JButton("취소");
+
+        final LocalDateTime[] resultDateTime = {null}; // 최종 결과 저장용 배열
+
+        setButton.addActionListener(e -> {
+            try {
+                int year = Integer.parseInt(yearField.getText());
+                int month = Integer.parseInt(monthField.getText());
+                int day = Integer.parseInt(dayField.getText());
+                int hour = Integer.parseInt(hourField.getText());
+                int minute = Integer.parseInt(minuteField.getText());
+
+                LocalDateTime proposedDateTime = LocalDateTime.of(year, month, day, hour, minute);
+                if (proposedDateTime.isBefore(LocalDateTime.now())) {
+                    JOptionPane.showMessageDialog(dateTimeDialog, "만료 시간은 현재 시간보다 미래여야 합니다.", "시간 오류", JOptionPane.WARNING_MESSAGE);
+                    resultDateTime[0] = null; // 유효하지 않은 시간
+                    return;
+                }
+                resultDateTime[0] = proposedDateTime;
+                dateTimeDialog.dispose();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dateTimeDialog, "유효한 숫자 값을 입력해주세요.", "입력 오류", JOptionPane.ERROR_MESSAGE);
+            } catch (java.time.DateTimeException ex) {
+                JOptionPane.showMessageDialog(dateTimeDialog, "유효하지 않은 날짜 또는 시간입니다: " + ex.getMessage(), "날짜/시간 오류", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        cancelButton.addActionListener(e -> dateTimeDialog.dispose());
+
+        buttonPanel.add(setButton);
+        buttonPanel.add(cancelButton);
+        dateTimeDialog.add(buttonPanel, BorderLayout.SOUTH);
+
+        dateTimeDialog.setVisible(true); // 모달 다이얼로그 표시
+        return resultDateTime[0]; // 다이얼로그 닫힌 후 결과 반환
+    }
+
 
     private void initComponents() {
         JPanel mainPanel = new JPanel(new BorderLayout());
@@ -195,9 +335,7 @@ public class ChatRoomDialog extends JDialog {
         chatArea.setEditorKit(editorKit);
         doc = (HTMLDocument) chatArea.getDocument();
         chatArea.setEditable(false);
-
-        // JScrollPane 인스턴스 저장
-        chatScrollPane = new JScrollPane(chatArea);
+        JScrollPane chatScrollPane = new JScrollPane(chatArea);
         centerPanel.add(chatScrollPane, BorderLayout.CENTER);
 
         JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
@@ -222,8 +360,8 @@ public class ChatRoomDialog extends JDialog {
         loadMessages(-1); // 기본 호출 (스크롤 메시지 ID 없음)
     }
 
-    public void loadMessages(int messageIdToScroll) {
-        this.pendingScrollMessageId = messageIdToScroll;
+    public void loadMessages(int messageIdToScroll) { // messageIdToScroll 인자 추가
+        this.pendingScrollMessageId = messageIdToScroll; // 메시지 ID 저장
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
     }
 
@@ -240,6 +378,7 @@ public class ChatRoomDialog extends JDialog {
             return;
         }
 
+        // 특정 명령어 처리
         if (content.startsWith("/s ")) {
             String projectName = content.substring(3).trim();
             if (projectName.isEmpty()) {
@@ -250,8 +389,7 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", "프로젝트 시작", "PROJECT_START", projectName);
             messageInput.setText("");
             return;
-        }
-        else if (content.startsWith("/del ")) {
+        } else if (content.startsWith("/del ")) {
             String projectNameToDelete = content.substring(5).trim();
             if (projectNameToDelete.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "삭제할 프로젝트 이름을 입력해주세요.\n예시: /del 삭제할 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -261,12 +399,11 @@ public class ChatRoomDialog extends JDialog {
             chatClient.deleteTimelineEvent(chatRoom.getRoomId(), projectNameToDelete);
             messageInput.setText("");
             return;
-        }
-        else if (content.startsWith("/c ")) {
+        } else if (content.startsWith("/c ")) {
             String commandArgs = content.substring(3).trim();
             int separatorIndex = commandArgs.indexOf("/");
 
-            if (separatorIndex == -1 || separatorIndex == 0 || separatorIndex == commandArgs.length() - 1) {
+            if (separatorIndex == -1 || separatorIndex == 0 || commandArgs.length() - 1 == separatorIndex) {
                 JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 '/'로 구분하여 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 messageInput.setText("");
                 return;
@@ -284,8 +421,7 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addProjectContentToTimeline(chatRoom.getRoomId(), projectName, projectContent);
             messageInput.setText("");
             return;
-        }
-        else if (content.startsWith("/d ")) {
+        } else if (content.startsWith("/d ")) {
             String projectNameToEnd = content.substring(3).trim();
             if (projectNameToEnd.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "종료할 프로젝트 이름을 입력해주세요.\n예시: /d 나의 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -296,16 +432,17 @@ public class ChatRoomDialog extends JDialog {
             messageInput.setText("");
             return;
         }
-
-
-        // 기존 메시지 전송 로직
-        MessageType type = MessageType.TEXT;
-        if (content.startsWith("/")) {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
-        } else {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
+        // 수정된 로직: 특정 명령어가 아닌 경우 또는 '/'로 시작하지만 정의된 명령어가 아닌 경우
+        else if (content.startsWith("/")) {
+            // 정의된 명령어가 아니지만 '/'로 시작하는 경우, 일반 텍스트로 보냅니다.
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
+            messageInput.setText("");
         }
-        messageInput.setText("");
+        else {
+            // '/'로 시작하지 않는 일반 메시지
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
+            messageInput.setText("");
+        }
     }
 
     private void attachFile() {
@@ -339,7 +476,7 @@ public class ChatRoomDialog extends JDialog {
 
         if (messages != null) {
             for (Message message : messages) {
-                appendMessageToChatArea(message);
+                appendMessageToChatArea(message); // HTML에 messageId를 포함하여 메시지를 추가
             }
         }
 
@@ -435,16 +572,17 @@ public class ChatRoomDialog extends JDialog {
                 }
             }
             String htmlMessage = String.format(
-                    "<div data-message-id='%d' style='clear: both; margin-bottom: 5px; %s'>" +
+                    "<div data-message-id='%d' data-is-notice='%b' style='clear: both; margin-bottom: 5px; %s'>" + // data-is-notice 추가
                             "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" +
                             "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" +
                             "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" +
                             "</div></div>",
-                    message.getMessageId(), // messageId 추가
+                    message.getMessageId(),
+                    message.isNotice(), // isNotice 값 추가
                     outerDivAlign,
                     backgroundColor,
                     innerBubbleMargin,
-                    (message.getSenderId() == currentUser.getUserId() || message.getMessageType() == MessageType.SYSTEM || message.isNotice() || message.getMessageType() == MessageType.COMMAND ? "text-align: right;" : "text-align: left;"),
+                    (message.getSenderId() == currentUser.getUserId() || message.getMessageType() == MessageType.SYSTEM || message.isNotice() ? "text-align: right;" : "text-align: left;"),
                     timestampAndSender,
                     fontWeight, textColor, fontStyle, prefix, contentToShow, suffix
             );
@@ -516,9 +654,11 @@ public class ChatRoomDialog extends JDialog {
 
                             chatArea.setSelectionStart(targetElement.getStartOffset());
                             chatArea.setSelectionEnd(targetElement.getEndOffset());
-                            Timer selectionTimer = new Timer(5000000, ev -> {
+                            Timer selectionTimer = new Timer(500000, ev -> {
                                 chatArea.setSelectionStart(doc.getLength());
                                 chatArea.setSelectionEnd(doc.getLength());
+                                // 여기서 강제 스크롤 코드를 제거합니다.
+                                // chatArea.setCaretPosition(doc.getLength()); // 이 라인을 제거하세요!
                             });
                             selectionTimer.setRepeats(false);
                             selectionTimer.start();

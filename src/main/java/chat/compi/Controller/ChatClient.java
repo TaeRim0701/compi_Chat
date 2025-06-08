@@ -1,7 +1,7 @@
+// ChatClient.java
 package chat.compi.Controller;
 
 import chat.compi.Dto.ClientRequest;
-
 import chat.compi.Dto.ServerResponse;
 import chat.compi.Entity.MessageType;
 import chat.compi.Entity.User;
@@ -11,6 +11,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -261,11 +262,19 @@ public class ChatClient {
         sendRequest(new ClientRequest(ClientRequest.RequestType.ADD_PROJECT_CONTENT_TO_TIMELINE, data));
     }
 
-    // 새롭게 추가: 프로젝트 종료 이벤트 요청 메서드
     public void endProjectToTimeline(int roomId, String projectName) {
         Map<String, Object> data = new HashMap<>();
         data.put("roomId", roomId);
         data.put("projectName", projectName);
         sendRequest(new ClientRequest(ClientRequest.RequestType.END_PROJECT_TO_TIMELINE, data));
+    }
+
+    // 새로운 markMessageAsNotice 헬퍼 메서드 (expiryTime 포함)
+    public void markMessageAsNotice(int messageId, boolean isNotice, LocalDateTime expiryTime) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("messageId", messageId);
+        data.put("isNotice", isNotice);
+        data.put("expiryTime", expiryTime); // 만료 시간 추가
+        sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
     }
 }

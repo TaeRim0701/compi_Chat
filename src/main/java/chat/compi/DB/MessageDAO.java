@@ -1,3 +1,4 @@
+// MessageDAO.java
 package chat.compi.DB;
 
 import chat.compi.Entity.Message;
@@ -18,8 +19,8 @@ public class MessageDAO {
      * @return 저장 성공 여부
      */
     public Message saveMessage(Message message) {
-        String sql = "INSERT INTO messages (room_id, sender_id, message_type, content, is_notice) VALUES (?, ?, ?, ?, ?)";
-        String updateRoomLastMessageSql = "UPDATE chat_rooms SET last_message_at = ? WHERE room_id = ?"; // 추가
+        String sql = "INSERT INTO messages (room_id, sender_id, message_type, content, is_notice, notice_expiry_time) VALUES (?, ?, ?, ?, ?, ?)";
+        String updateRoomLastMessageSql = "UPDATE chat_rooms SET last_message_at = ? WHERE room_id = ?";
 
         try (Connection conn = DatabaseConnection.getConnection()) {
             conn.setAutoCommit(false); // 트랜잭션 시작
@@ -30,6 +31,11 @@ public class MessageDAO {
                 pstmt.setString(3, message.getMessageType().name());
                 pstmt.setString(4, message.getContent());
                 pstmt.setBoolean(5, message.isNotice());
+                if (message.getNoticeExpiryTime() != null) {
+                    pstmt.setTimestamp(6, Timestamp.valueOf(message.getNoticeExpiryTime()));
+                } else {
+                    pstmt.setNull(6, Types.TIMESTAMP);
+                }
                 int affectedRows = pstmt.executeUpdate();
 
                 if (affectedRows > 0) {
@@ -43,14 +49,13 @@ public class MessageDAO {
                 }
             }
 
-            // chat_rooms 테이블의 last_message_at 업데이트
             try (PreparedStatement updatePstmt = conn.prepareStatement(updateRoomLastMessageSql)) {
-                updatePstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now())); // 현재 시간으로 업데이트
+                updatePstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now()));
                 updatePstmt.setInt(2, message.getRoomId());
                 updatePstmt.executeUpdate();
             }
 
-            conn.commit(); // 모든 작업 성공 시 커밋
+            conn.commit();
             return message;
         } catch (SQLException e) {
             System.err.println("Error saving message and updating chat room last_message_at: " + e.getMessage());
@@ -66,7 +71,7 @@ public class MessageDAO {
      */
     public List<Message> getMessagesInRoom(int roomId) {
         List<Message> messages = new ArrayList<>();
-        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
+        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice, m.notice_expiry_time " + // 컬럼명 수정
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
                 "WHERE m.room_id = ? ORDER BY m.sent_at ASC";
         try (Connection conn = DatabaseConnection.getConnection();
@@ -82,7 +87,10 @@ public class MessageDAO {
                 String content = rs.getString("content");
                 LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
                 boolean isNotice = rs.getBoolean("is_notice");
-                messages.add(new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+                Timestamp expiryTs = rs.getTimestamp("notice_expiry_time"); // 컬럼명 수정
+                LocalDateTime noticeExpiryTime = (expiryTs != null) ? expiryTs.toLocalDateTime() : null;
+
+                messages.add(new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice, noticeExpiryTime));
             }
         } catch (SQLException e) {
             System.err.println("Error getting messages in room: " + e.getMessage());
@@ -96,7 +104,6 @@ public class MessageDAO {
      * @param userId 읽은 사용자 ID
      * @return 성공 여부
      */
-    // MessageDAO.java
     public int markMessageAsReadStatus(int messageId, int userId) {
         String sql = "INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)";
         try (Connection conn = DatabaseConnection.getConnection();
@@ -105,19 +112,17 @@ public class MessageDAO {
             pstmt.setInt(2, userId);
             int affectedRows = pstmt.executeUpdate();
             if (affectedRows > 0) {
-                return 1; // 성공적으로 삽입됨
+                return 1;
             } else {
-                // affectedRows가 0인 경우: INSERT IGNORE에 의해 중복 키 삽입 무시됨
-                return 0; // 이미 존재하거나 삽입되지 않음
+                return 0;
             }
         } catch (SQLException e) {
             System.err.println("Error marking message as read: " + e.getMessage());
-            e.printStackTrace(); // 여전히 상세 에러 로그를 남깁니다.
-            return -1; // DB 오류 발생
+            e.printStackTrace();
+            return -1;
         }
     }
 
-    // 기존 markMessageAsRead는 이 새로운 메서드를 기반으로 수정하거나 제거
     public boolean markMessageAsRead(int messageId, int userId) {
         return markMessageAsReadStatus(messageId, userId) > 0;
     }
@@ -172,9 +177,10 @@ public class MessageDAO {
      */
     public List<Message> getNoticeMessagesInRoom(int roomId) {
         List<Message> notices = new ArrayList<>();
-        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
+        // notice_expiry_time이 현재 시간보다 미래이거나 NULL인 공지만 조회
+        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice, m.notice_expiry_time " + // 컬럼명 수정
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
-                "WHERE m.is_notice = TRUE AND m.room_id = ? ORDER BY m.sent_at DESC";
+                "WHERE m.is_notice = TRUE AND m.room_id = ? AND (m.notice_expiry_time IS NULL OR m.notice_expiry_time > NOW()) ORDER BY m.sent_at DESC";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, roomId);
@@ -188,7 +194,10 @@ public class MessageDAO {
                     String content = rs.getString("content");
                     LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
                     boolean isNotice = rs.getBoolean("is_notice");
-                    notices.add(new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+                    Timestamp expiryTs = rs.getTimestamp("notice_expiry_time"); // 컬럼명 수정
+                    LocalDateTime noticeExpiryTime = (expiryTs != null) ? expiryTs.toLocalDateTime() : null;
+
+                    notices.add(new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice, noticeExpiryTime));
                 }
             }
         } catch (SQLException e) {
@@ -198,7 +207,8 @@ public class MessageDAO {
     }
 
     public Message getMessageById(int messageId) {
-        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
+        // notice_expiry_time 컬럼 조회에 추가
+        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice, m.notice_expiry_time " + // 컬럼명 수정
                 "FROM messages m JOIN users u ON m.sender_id = u.user_id " +
                 "WHERE m.message_id = ?";
         try (Connection conn = DatabaseConnection.getConnection();
@@ -213,7 +223,10 @@ public class MessageDAO {
                 String content = rs.getString("content");
                 LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
                 boolean isNotice = rs.getBoolean("is_notice");
-                return new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice);
+                Timestamp expiryTs = rs.getTimestamp("notice_expiry_time"); // 컬럼명 수정
+                LocalDateTime noticeExpiryTime = (expiryTs != null) ? expiryTs.toLocalDateTime() : null;
+
+                return new Message(messageId, rId, senderId, senderNickname, messageType, content, sentAt, isNotice, noticeExpiryTime);
             }
         } catch (SQLException e) {
             System.err.println("Error getting message by ID: " + e.getMessage());
@@ -272,21 +285,47 @@ public class MessageDAO {
     }
 
     /**
-     * 특정 메시지의 공지 상태를 업데이트합니다.
+     * 특정 메시지의 공지 상태 및 만료 시간을 업데이트합니다.
      * @param messageId 메시지 ID
      * @param isNotice 공지 여부 (true: 공지로 설정, false: 공지 해제)
+     * @param expiryTime 공지 만료 시간 (isNotice가 true일 때만 유효, null이면 만료 시간 없음)
      * @return 업데이트 성공 여부
      */
-    public boolean updateMessageNoticeStatus(int messageId, boolean isNotice) {
-        String sql = "UPDATE messages SET is_notice = ? WHERE message_id = ?";
+    public boolean updateMessageNoticeStatus(int messageId, boolean isNotice, LocalDateTime expiryTime) {
+        String sql = "UPDATE messages SET is_notice = ?, notice_expiry_time = ? WHERE message_id = ?";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setBoolean(1, isNotice);
-            pstmt.setInt(2, messageId);
+            if (isNotice && expiryTime != null) {
+                pstmt.setTimestamp(2, Timestamp.valueOf(expiryTime));
+            } else {
+                pstmt.setNull(2, Types.TIMESTAMP); // 공지 해제 시 또는 만료 시간 지정 안 할 시 NULL
+            }
+            pstmt.setInt(3, messageId);
             return pstmt.executeUpdate() > 0;
         } catch (SQLException e) {
             System.err.println("Error updating message notice status for message ID " + messageId + ": " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * 만료된 공지 메시지의 is_notice 상태를 해제합니다.
+     * 이 메서드는 주기적으로 호출되어야 합니다.
+     * @return 상태가 변경된 메시지 수
+     */
+    public int clearExpiredNotices() {
+        String sql = "UPDATE messages SET is_notice = FALSE, notice_expiry_time = NULL WHERE is_notice = TRUE AND notice_expiry_time IS NOT NULL AND notice_expiry_time <= NOW()";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            int affectedRows = pstmt.executeUpdate();
+            if (affectedRows > 0) {
+                System.out.println(affectedRows + " expired notices cleared.");
+            }
+            return affectedRows;
+        } catch (SQLException e) {
+            System.err.println("Error clearing expired notices: " + e.getMessage());
+            return 0;
         }
     }
 
@@ -299,30 +338,29 @@ public class MessageDAO {
      */
     public List<Message> getUnreadSystemMessagesForUser(int userId, int systemUserId) {
         List<Message> unreadSystemMessages = new ArrayList<>();
-        // 이 쿼리는 이제 시스템 채팅방 (systemUserId와 userId간의 1:1 채팅방)의 메시지를 가져오는 데 사용될 수 있습니다.
-        // 하지만 편의상 여전히 sender_id가 systemUserId인 메시지를 가져오도록 유지합니다.
-        // 즉, '미열람 알림 프레임'을 채우는 용도로 사용되거나, 클라이언트가 로그인 시 초기 시스템 채팅방 메시지를 로드하는 용도로 사용될 수 있습니다.
-        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice " +
+        String sql = "SELECT m.message_id, m.room_id, m.sender_id, u.nickname as sender_nickname, m.message_type, m.content, m.sent_at, m.is_notice, m.notice_expiry_time " + // 컬럼명 수정
                 "FROM messages m " +
                 "JOIN users u ON m.sender_id = u.user_id " +
-                "LEFT JOIN message_reads mr ON m.message_id = mr.message_id AND mr.user_id = ? " + // 해당 사용자가 읽었는지
-                "WHERE m.message_type = 'SYSTEM' AND mr.user_id IS NULL AND m.sender_id = ? " + // 시스템 메시지이고, 해당 사용자가 읽지 않은 경우, 시스템 봇이 보낸 메시지
+                "LEFT JOIN message_reads mr ON m.message_id = mr.message_id AND mr.user_id = ? " +
+                "WHERE m.message_type = 'SYSTEM' AND mr.user_id IS NULL AND m.sender_id = ? " +
                 "ORDER BY m.sent_at ASC";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, userId);
-            pstmt.setInt(2, systemUserId); // 시스템 봇의 ID
+            pstmt.setInt(2, systemUserId);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     int messageId = rs.getInt("message_id");
-                    int roomId = rs.getInt("room_id"); // 이 roomId는 시스템 메시지가 저장된 실제 채팅방 ID
+                    int roomId = rs.getInt("room_id");
                     int senderId = rs.getInt("sender_id");
                     String senderNickname = rs.getString("sender_nickname");
                     MessageType messageType = MessageType.valueOf(rs.getString("message_type"));
                     String content = rs.getString("content");
                     LocalDateTime sentAt = rs.getTimestamp("sent_at").toLocalDateTime();
                     boolean isNotice = rs.getBoolean("is_notice");
-                    unreadSystemMessages.add(new Message(messageId, roomId, senderId, senderNickname, messageType, content, sentAt, isNotice));
+                    Timestamp expiryTs = rs.getTimestamp("notice_expiry_time"); // 컬럼명 수정
+                    LocalDateTime noticeExpiryTime = (expiryTs != null) ? expiryTs.toLocalDateTime() : null;
+                    unreadSystemMessages.add(new Message(messageId, roomId, senderId, senderNickname, messageType, content, sentAt, isNotice, noticeExpiryTime));
                 }
             }
         } catch (SQLException e) {

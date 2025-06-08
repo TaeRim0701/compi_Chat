@@ -472,8 +472,11 @@ public class ClientHandler implements Runnable {
             case MARK_AS_NOTICE:
                 int messageIdToMark = (int) request.getData().get("messageId");
                 boolean markAsNotice = (boolean) request.getData().get("isNotice");
+                // LocalDateTime 처리: 클라이언트에서 LocalDateTime 객체로 보낼 것.
+                LocalDateTime expiryTime = (LocalDateTime) request.getData().get("expiryTime");
                 int roomIdForNotice = (int) request.getData().get("roomId");
-                if (messageDAO.updateMessageNoticeStatus(messageIdToMark, markAsNotice)) {
+
+                if (messageDAO.updateMessageNoticeStatus(messageIdToMark, markAsNotice, expiryTime)) {
                     responseData.put("messageId", messageIdToMark);
                     responseData.put("isNotice", markAsNotice);
                     responseData.put("roomId", roomIdForNotice);
@@ -658,6 +661,13 @@ public class ClientHandler implements Runnable {
                 responseData.put("unreadRoomId", systemRoom.getRoomId());
                 response = new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System chat messages loaded", responseData);
                 sendResponse(response);
+                break;
+
+            case CLEAR_EXPIRED_NOTICES: // 새로운 요청 타입 처리
+                int clearedCount = messageDAO.clearExpiredNotices();
+                System.out.println("Cleared " + clearedCount + " expired notices.");
+                response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, clearedCount + " expired notices cleared.", null);
+                sendResponse(response); // 요청한 클라이언트에게 응답
                 break;
 
             default:

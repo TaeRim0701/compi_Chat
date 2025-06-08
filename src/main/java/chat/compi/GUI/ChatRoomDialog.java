@@ -15,6 +15,8 @@ import javax.swing.text.Element;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.event.MouseAdapter;
@@ -27,6 +29,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.Enumeration;
 
 @SuppressWarnings("unchecked")
 public class ChatRoomDialog extends JDialog {
@@ -43,6 +46,12 @@ public class ChatRoomDialog extends JDialog {
     private JButton fileAttachButton;
 
     private JLabel roomNameLabel;
+
+    // 스크롤할 메시지 ID 임시 저장 필드
+    private int pendingScrollMessageId = -1;
+
+    // JScrollPane 인스턴스를 저장하여 스크롤바 상태를 직접 확인
+    private JScrollPane chatScrollPane;
 
     public ChatRoomDialog(JFrame parent, ChatClient client, ChatRoom room) {
         super(parent, room.getRoomName(), false);
@@ -186,7 +195,9 @@ public class ChatRoomDialog extends JDialog {
         chatArea.setEditorKit(editorKit);
         doc = (HTMLDocument) chatArea.getDocument();
         chatArea.setEditable(false);
-        JScrollPane chatScrollPane = new JScrollPane(chatArea);
+
+        // JScrollPane 인스턴스 저장
+        chatScrollPane = new JScrollPane(chatArea);
         centerPanel.add(chatScrollPane, BorderLayout.CENTER);
 
         JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
@@ -208,6 +219,11 @@ public class ChatRoomDialog extends JDialog {
     }
 
     public void loadMessages() {
+        loadMessages(-1); // 기본 호출 (스크롤 메시지 ID 없음)
+    }
+
+    public void loadMessages(int messageIdToScroll) {
+        this.pendingScrollMessageId = messageIdToScroll;
         chatClient.getMessagesInRoom(chatRoom.getRoomId());
     }
 
@@ -224,7 +240,6 @@ public class ChatRoomDialog extends JDialog {
             return;
         }
 
-        // 특정 명령어 처리
         if (content.startsWith("/s ")) {
             String projectName = content.substring(3).trim();
             if (projectName.isEmpty()) {
@@ -235,7 +250,8 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", "프로젝트 시작", "PROJECT_START", projectName);
             messageInput.setText("");
             return;
-        } else if (content.startsWith("/del ")) {
+        }
+        else if (content.startsWith("/del ")) {
             String projectNameToDelete = content.substring(5).trim();
             if (projectNameToDelete.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "삭제할 프로젝트 이름을 입력해주세요.\n예시: /del 삭제할 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -245,11 +261,12 @@ public class ChatRoomDialog extends JDialog {
             chatClient.deleteTimelineEvent(chatRoom.getRoomId(), projectNameToDelete);
             messageInput.setText("");
             return;
-        } else if (content.startsWith("/c ")) {
+        }
+        else if (content.startsWith("/c ")) {
             String commandArgs = content.substring(3).trim();
             int separatorIndex = commandArgs.indexOf("/");
 
-            if (separatorIndex == -1 || separatorIndex == 0 || commandArgs.length() - 1 == separatorIndex) { // 수정된 조건: '/'가 맨 처음 또는 맨 끝에 오는 경우도 포함
+            if (separatorIndex == -1 || separatorIndex == 0 || separatorIndex == commandArgs.length() - 1) {
                 JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 '/'로 구분하여 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 messageInput.setText("");
                 return;
@@ -267,7 +284,8 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addProjectContentToTimeline(chatRoom.getRoomId(), projectName, projectContent);
             messageInput.setText("");
             return;
-        } else if (content.startsWith("/d ")) {
+        }
+        else if (content.startsWith("/d ")) {
             String projectNameToEnd = content.substring(3).trim();
             if (projectNameToEnd.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "종료할 프로젝트 이름을 입력해주세요.\n예시: /d 나의 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -278,17 +296,16 @@ public class ChatRoomDialog extends JDialog {
             messageInput.setText("");
             return;
         }
-        // 수정된 로직: 특정 명령어가 아닌 경우 또는 '/'로 시작하지만 정의된 명령어가 아닌 경우
-        else if (content.startsWith("/")) {
-            // 정의된 명령어가 아니지만 '/'로 시작하는 경우, 일반 텍스트로 보냅니다.
-            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
-            messageInput.setText("");
+
+
+        // 기존 메시지 전송 로직
+        MessageType type = MessageType.TEXT;
+        if (content.startsWith("/")) {
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
+        } else {
+            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
         }
-        else {
-            // '/'로 시작하지 않는 일반 메시지
-            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
-            messageInput.setText("");
-        }
+        messageInput.setText("");
     }
 
     private void attachFile() {
@@ -311,32 +328,42 @@ public class ChatRoomDialog extends JDialog {
     }
 
     public void displayMessages(List<Message> messages) {
+        // 현재 스크롤 위치 저장 (최하단 여부 판단용)
+        boolean wasAtBottom = isUserAtBottom();
+
         try {
             doc.remove(0, doc.getLength());
-            if (messages != null) {
-                for (Message message : messages) {
-                    appendMessageToChatArea(message);
-
-                    if (message.getSenderId() != currentUser.getUserId() && message.getMessageType() != MessageType.SYSTEM) {
-                        boolean isReadByCurrentUser = message.getReaders() != null &&
-                                message.getReaders().stream().anyMatch(reader -> reader.getUserId() == currentUser.getUserId());
-                        if (!isReadByCurrentUser) {
-                            chatClient.markMessageAsRead(message.getMessageId());
-                        }
-                    }
-                }
-            }
-            chatArea.setCaretPosition(doc.getLength());
-
         } catch (BadLocationException e) {
-            System.err.println("Error clearing or appending messages: " + e.getMessage());
+            System.err.println("Error clearing messages: " + e.getMessage());
         }
+
+        if (messages != null) {
+            for (Message message : messages) {
+                appendMessageToChatArea(message);
+            }
+        }
+
+        // 모든 메시지 로드 후 스크롤 로직
+        SwingUtilities.invokeLater(() -> {
+            if (pendingScrollMessageId != -1) {
+                scrollToMessage(pendingScrollMessageId);
+                pendingScrollMessageId = -1; // 스크롤 요청 처리 후 초기화
+            } else if (wasAtBottom) { // 새로운 메시지가 로드될 때만 (채팅방 열 때는 모든 메시지 로드 후 최하단)
+                // 이전에 최하단에 있었다면 새로운 메시지 도착 시에도 최하단으로 스크롤
+                chatArea.setCaretPosition(doc.getLength());
+            }
+            // else (wasAtBottom이 false인 경우): 사용자가 위로 스크롤한 상태이므로 자동 스크롤하지 않음
+        });
     }
 
     public void appendMessageToChatArea(Message message) {
         if (message == null) {
             return;
         }
+
+        // 새로운 메시지가 추가되기 전의 스크롤 위치를 확인
+        // 만약 사용자 자신의 메시지이거나, 현재 스크롤이 최하단에 있다면 자동 스크롤해야 함.
+        boolean shouldAutoScroll = (message.getSenderId() == currentUser.getUserId() || isUserAtBottom());
 
         try {
             String backgroundColor;
@@ -370,7 +397,6 @@ public class ChatRoomDialog extends JDialog {
             String contentToShow = message.getContent();
             String timestampAndSender;
 
-            // COMMAND 타입 메시지의 경우에도 일반 메시지처럼 처리되도록 변경
             if (message.getMessageType() == MessageType.SYSTEM) {
                 fontStyle = "italic";
                 textColor = "gray";
@@ -388,7 +414,7 @@ public class ChatRoomDialog extends JDialog {
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
-            } else { // TEXT 또는 COMMAND 메시지
+            } else { // TEXT 또는 COMMAND 메시지 (COMMAND는 이제 TEXT처럼 처리)
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
@@ -408,14 +434,13 @@ public class ChatRoomDialog extends JDialog {
                     }
                 }
             }
-
             String htmlMessage = String.format(
                     "<div data-message-id='%d' style='clear: both; margin-bottom: 5px; %s'>" +
                             "<div style='display: inline-block; background-color: %s; padding: 8px 12px; border-radius: 10px; max-width: 70%%; word-wrap: break-word; %s'>" +
                             "<span style='color: #888; font-size: 0.8em; display: block; %s'>%s</span>" +
                             "<span style='font-weight: %s; color: %s; font-style: %s; display: block;'>%s%s%s</span>" +
                             "</div></div>",
-                    message.getMessageId(),
+                    message.getMessageId(), // messageId 추가
                     outerDivAlign,
                     backgroundColor,
                     innerBubbleMargin,
@@ -425,12 +450,130 @@ public class ChatRoomDialog extends JDialog {
             );
 
             editorKit.insertHTML(doc, doc.getLength(), htmlMessage, 0, 0, null);
-            chatArea.setCaretPosition(doc.getLength());
+
+            // 메시지 추가 후 자동 스크롤 조건
+            if (shouldAutoScroll) {
+                SwingUtilities.invokeLater(() -> chatArea.setCaretPosition(doc.getLength()));
+            }
 
         } catch (BadLocationException | IOException e) {
             System.err.println("Error appending message to chat area: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 사용자가 현재 채팅창의 최하단에 스크롤되어 있는지 확인합니다.
+     * @return 최하단에 스크롤되어 있다면 true, 그렇지 않다면 false
+     */
+    private boolean isUserAtBottom() {
+        if (chatScrollPane == null) {
+            return true; // 스크롤 패인이 없으면 항상 최하단으로 가정 (초기 로딩 시)
+        }
+        JScrollBar verticalScrollBar = chatScrollPane.getVerticalScrollBar();
+        int maxScroll = verticalScrollBar.getMaximum() - verticalScrollBar.getVisibleAmount();
+        int currentScroll = verticalScrollBar.getValue();
+
+        // 오차 범위 50 픽셀 내라면 최하단으로 간주
+        return (Math.abs(currentScroll - maxScroll) <= 50);
+    }
+
+
+    /**
+     * 특정 메시지 ID로 채팅창을 스크롤합니다.
+     * 이 메서드는 JEditorPane의 HTML 문서에서 해당 메시지 ID를 가진 요소를 찾아 스크롤합니다.
+     * @param messageId 스크롤할 메시지의 ID
+     */
+    public void scrollToMessage(int messageId) {
+        final int targetMessageId = messageId;
+        final int maxRetries = 10;
+        final int retryDelay = 50;
+
+        Timer retryTimer = new Timer(retryDelay, new ActionListener() {
+            private int currentRetry = 0;
+
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                currentRetry++;
+                System.out.println("scrollToMessage: Retrying for ID " + targetMessageId + ", attempt " + currentRetry);
+
+                HTMLDocument doc = (HTMLDocument) chatArea.getDocument();
+                Element targetElement = findElementById(doc.getDefaultRootElement(), targetMessageId);
+
+                if (targetElement != null) {
+                    try {
+                        Rectangle rect = chatArea.modelToView(targetElement.getStartOffset());
+                        if (rect != null) {
+                            JScrollPane scrollPane = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, chatArea);
+                            if (scrollPane != null) {
+                                JViewport viewport = scrollPane.getViewport();
+                                Point currentView = viewport.getViewPosition();
+                                Point newViewPosition = new Point(currentView.x, rect.y);
+                                viewport.setViewPosition(newViewPosition);
+                            } else {
+                                chatArea.scrollRectToVisible(rect);
+                            }
+
+                            chatArea.setSelectionStart(targetElement.getStartOffset());
+                            chatArea.setSelectionEnd(targetElement.getEndOffset());
+                            Timer selectionTimer = new Timer(5000000, ev -> {
+                                chatArea.setSelectionStart(doc.getLength());
+                                chatArea.setSelectionEnd(doc.getLength());
+                            });
+                            selectionTimer.setRepeats(false);
+                            selectionTimer.start();
+
+                            System.out.println("Scrolled to message ID: " + targetMessageId + " after " + currentRetry + " retries.");
+                            ((Timer) e.getSource()).stop();
+                        }
+                    } catch (BadLocationException ex) {
+                        System.err.println("Error scrolling to message during retry: " + ex.getMessage());
+                        ((Timer) e.getSource()).stop();
+                    }
+                } else if (currentRetry >= maxRetries) {
+                    System.out.println("scrollToMessage: Message with ID " + targetMessageId + " not found after " + maxRetries + " attempts. Giving up.");
+                    ((Timer) e.getSource()).stop();
+                }
+            }
+        });
+        retryTimer.setRepeats(true);
+        retryTimer.start();
+    }
+
+    /**
+     * HTML 문서에서 특정 data-message-id를 가진 Element를 재귀적으로 찾는 헬퍼 메서드.
+     * JEditorPane의 HTMLDocument 구조는 복잡할 수 있으므로, 모든 자식 요소를 탐색합니다.
+     * @param element 현재 탐색 중인 Element
+     * @param messageId 찾으려는 메시지 ID
+     * @return 찾은 Element 또는 null
+     */
+    private Element findElementById(Element element, int messageId) {
+        if (element == null) {
+            return null;
+        }
+
+        // 현재 Element가 찾고 있는 메시지 div인지 확인
+        AttributeSet attrs = element.getAttributes();
+        String msgIdStr = (String) attrs.getAttribute("data-message-id");
+        if (msgIdStr != null) {
+            try {
+                if (Integer.parseInt(msgIdStr) == messageId) {
+                    return element; // 찾았으면 반환
+                }
+            } catch (NumberFormatException e) {
+                // 유효하지 않은 ID 형식, 무시하고 계속 탐색
+            }
+        }
+
+        // 자식 Element들을 재귀적으로 탐색
+        for (int i = 0; i < element.getElementCount(); i++) {
+            Element child = element.getElement(i);
+            Element found = findElementById(child, messageId);
+            if (found != null) {
+                return found; // 자식에서 찾았으면 반환
+            }
+        }
+        return null; // 못 찾음
     }
 
 

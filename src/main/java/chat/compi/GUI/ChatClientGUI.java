@@ -19,6 +19,14 @@ import java.util.*;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+
+// JEditorPane 관련 추가 임포트
+import javax.swing.text.html.HTMLDocument;
+import javax.swing.text.html.HTMLEditorKit;
+import javax.swing.text.BadLocationException;
+import javax.swing.event.HyperlinkEvent; // HyperlinkEvent 임포트 추가
 
 @SuppressWarnings("unchecked")
 public class ChatClientGUI extends JFrame {
@@ -46,13 +54,19 @@ public class ChatClientGUI extends JFrame {
 
     // 별도 창들
     private JFrame noticeFrame;
-    private JTextArea noticeArea;
+    private JEditorPane noticeArea; // JTextArea -> JEditorPane으로 변경
+    private HTMLEditorKit noticeEditorKit; // 추가
+    private HTMLDocument noticeDoc; // 추가
+
     private JFrame timelineFrame;
     private JTextArea timelineArea;
 
     private JList<String> projectList;
     private DefaultListModel<String> projectListModel;
     private List<TimelineEvent> allTimelineEvents;
+
+    // 공지사항 메시지 리스트를 저장하는 필드 추가
+    private List<Message> currentNoticeMessages;
 
     public JFrame getNoticeFrame() {
         return noticeFrame;
@@ -71,6 +85,7 @@ public class ChatClientGUI extends JFrame {
         setLocationRelativeTo(null);
 
         openChatRoomDialogs = new HashMap<>();
+        currentNoticeMessages = new ArrayList<>(); // 초기화
 
         addWindowListener(new WindowAdapter() {
             @Override
@@ -216,8 +231,14 @@ public class ChatClientGUI extends JFrame {
         add(mainPanel);
     }
 
+    // openChatRoomDialog 메서드 오버로드: 기본 호출 시 스크롤 메시지 ID 없음
     private void openChatRoomDialog(ChatRoom room) {
-        System.out.println("openChatRoomDialog called for room ID: " + room.getRoomId() + ", name: " + room.getRoomName());
+        openChatRoomDialog(room, -1);
+    }
+
+    // openChatRoomDialog 메서드 시그니처 변경 (targetMessageId 인자 추가)
+    private void openChatRoomDialog(ChatRoom room, int targetMessageId) {
+        System.out.println("openChatRoomDialog called for room ID: " + room.getRoomId() + ", name: " + room.getRoomName() + ", targetMessageId: " + targetMessageId);
         ChatRoomDialog dialog = openChatRoomDialogs.get(room.getRoomId());
         if (dialog == null) {
             System.out.println("  Dialog for room " + room.getRoomId() + " not found in map. Creating new dialog.");
@@ -237,7 +258,7 @@ public class ChatClientGUI extends JFrame {
         }
         dialog.setVisible(true);
         dialog.toFront();
-        dialog.loadMessages();
+        dialog.loadMessages(targetMessageId); // 수정: targetMessageId 전달
         System.out.println("Opened chat room dialog for room ID: " + room.getRoomId() + " (" + room.getRoomName() + ")");
     }
 
@@ -403,6 +424,7 @@ public class ChatClientGUI extends JFrame {
     private void handleNoticeListUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
             List<Message> notices = (List<Message>) response.getData().get("noticeMessages");
+            currentNoticeMessages = notices; // 리스트 저장
             updateNoticeArea(notices);
         });
     }
@@ -537,24 +559,93 @@ public class ChatClientGUI extends JFrame {
         noticeFrame.setLocationRelativeTo(this);
         noticeFrame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
 
-        noticeArea = new JTextArea();
+        noticeArea = new JEditorPane(); // JTextArea -> JEditorPane으로 변경
+        noticeEditorKit = new HTMLEditorKit(); // 추가
+        noticeArea.setEditorKit(noticeEditorKit); // 추가
+        noticeDoc = (HTMLDocument) noticeArea.getDocument(); // 추가
+
         noticeArea.setEditable(false);
-        noticeArea.setLineWrap(true);
-        noticeArea.setWrapStyleWord(true);
+        // noticeArea.setLineWrap(true); // JEditorPane은 HTML 렌더링 시 자동 줄바꿈 지원
+        // noticeArea.setWrapStyleWord(true); // JEditorPane은 HTML 렌더링 시 자동 줄바꿈 지원
+
         JScrollPane scrollPane = new JScrollPane(noticeArea);
         noticeFrame.add(scrollPane);
+
+        // HyperlinkListener 추가
+        noticeArea.addHyperlinkListener(e -> {
+            if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                String description = e.getDescription();
+                if (description != null && description.startsWith("notice://")) {
+                    try {
+                        String[] parts = description.substring("notice://".length()).split("/");
+                        int roomId = Integer.parseInt(parts[0]);
+                        int messageId = Integer.parseInt(parts[1]);
+
+                        System.out.println("Clicked notice: Room ID " + roomId + ", Message ID " + messageId);
+
+                        ChatRoom targetRoom = null;
+                        for (int i = 0; i < chatRoomListModel.size(); i++) {
+                            ChatRoom room = chatRoomListModel.getElementAt(i);
+                            if (room.getRoomId() == roomId) {
+                                targetRoom = room;
+                                break;
+                            }
+                        }
+
+                        if (targetRoom != null) {
+                            openChatRoomDialog(targetRoom, messageId); // 새로운 시그니처로 호출
+                            noticeFrame.setVisible(false); // 공지 프레임 숨기기
+                        } else {
+                            JOptionPane.showMessageDialog(noticeFrame, "해당 공지가 속한 채팅방을 찾을 수 없습니다.", "오류", JOptionPane.ERROR_MESSAGE);
+                            // 또한, 채팅방 목록을 새로고침하여 누락된 채팅방이 있는지 확인할 수 있습니다.
+                            chatClient.getChatRooms();
+                        }
+
+                    } catch (NumberFormatException | ArrayIndexOutOfBoundsException ex) {
+                        System.err.println("Invalid notice link format: " + description + " - " + ex.getMessage());
+                    }
+                }
+            }
+        });
     }
 
     private void updateNoticeArea(List<Message> notices) {
-        noticeArea.setText("");
+        currentNoticeMessages = notices; // 리스트 저장
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-        for (Message notice : notices) {
-            noticeArea.append(
-                    "[" + notice.getSentAt().format(formatter) + "] " +
-                            notice.getSenderNickname() + ": " + notice.getContent() + "\n\n"
-            );
+        StringBuilder htmlContent = new StringBuilder("<html><body>");
+
+        if (notices.isEmpty()) {
+            htmlContent.append("<p>공지사항이 없습니다.</p>");
+        } else {
+            for (Message notice : notices) {
+                // 각 공지 메시지에 고유한 링크를 부여
+                // "notice://[roomId]/[messageId]" 형식의 링크 사용
+                String link = "notice://" + notice.getRoomId() + "/" + notice.getMessageId();
+                htmlContent.append(String.format(
+                        "<p style='margin-bottom: 10px;'>" +
+                                "<a href='%s' style='text-decoration: none; color: black;'>" + // 링크 스타일
+                                "<span style='font-size: 0.9em; color: #888;'>[%s] %s: </span>" +
+                                "<span style='font-weight: bold;'>%s</span>" +
+                                "</a></p>",
+                        link,
+                        notice.getSentAt().format(formatter),
+                        notice.getSenderNickname(),
+                        notice.getContent()
+                ));
+            }
         }
-        noticeArea.setCaretPosition(0);
+        htmlContent.append("</body></html>");
+
+        SwingUtilities.invokeLater(() -> {
+            try {
+                noticeDoc.remove(0, noticeDoc.getLength()); // 기존 내용 삭제
+                noticeEditorKit.insertHTML(noticeDoc, noticeDoc.getLength(), htmlContent.toString(), 0, 0, null);
+                noticeArea.setCaretPosition(0);
+            } catch (BadLocationException | IOException e) {
+                System.err.println("Error updating notice area: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
     }
 
     private void initTimelineFrame() {

@@ -224,6 +224,7 @@ public class ChatRoomDialog extends JDialog {
             return;
         }
 
+        // 특정 명령어 처리
         if (content.startsWith("/s ")) {
             String projectName = content.substring(3).trim();
             if (projectName.isEmpty()) {
@@ -234,8 +235,7 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addTimelineEvent(chatRoom.getRoomId(), "/s", "프로젝트 시작", "PROJECT_START", projectName);
             messageInput.setText("");
             return;
-        }
-        else if (content.startsWith("/del ")) {
+        } else if (content.startsWith("/del ")) {
             String projectNameToDelete = content.substring(5).trim();
             if (projectNameToDelete.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "삭제할 프로젝트 이름을 입력해주세요.\n예시: /del 삭제할 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -245,12 +245,11 @@ public class ChatRoomDialog extends JDialog {
             chatClient.deleteTimelineEvent(chatRoom.getRoomId(), projectNameToDelete);
             messageInput.setText("");
             return;
-        }
-        else if (content.startsWith("/c ")) {
+        } else if (content.startsWith("/c ")) {
             String commandArgs = content.substring(3).trim();
             int separatorIndex = commandArgs.indexOf("/");
 
-            if (separatorIndex == -1 || separatorIndex == 0 || separatorIndex == commandArgs.length() - 1) {
+            if (separatorIndex == -1 || separatorIndex == 0 || commandArgs.length() - 1 == separatorIndex) { // 수정된 조건: '/'가 맨 처음 또는 맨 끝에 오는 경우도 포함
                 JOptionPane.showMessageDialog(this, "프로젝트 이름과 내용을 '/'로 구분하여 입력해주세요.\n예시: /c 나의 프로젝트/새로운 내용", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 messageInput.setText("");
                 return;
@@ -268,9 +267,7 @@ public class ChatRoomDialog extends JDialog {
             chatClient.addProjectContentToTimeline(chatRoom.getRoomId(), projectName, projectContent);
             messageInput.setText("");
             return;
-        }
-        // "/d (프로젝트 이름)" 명령어 처리 추가
-        else if (content.startsWith("/d ")) {
+        } else if (content.startsWith("/d ")) {
             String projectNameToEnd = content.substring(3).trim();
             if (projectNameToEnd.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "종료할 프로젝트 이름을 입력해주세요.\n예시: /d 나의 프로젝트", "입력 오류", JOptionPane.WARNING_MESSAGE);
@@ -281,16 +278,17 @@ public class ChatRoomDialog extends JDialog {
             messageInput.setText("");
             return;
         }
-
-
-        // 기존 메시지 전송 로직
-        MessageType type = MessageType.TEXT;
-        if (content.startsWith("/")) {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.COMMAND, false);
-        } else {
-            chatClient.sendMessage(chatRoom.getRoomId(), content, type, false);
+        // 수정된 로직: 특정 명령어가 아닌 경우 또는 '/'로 시작하지만 정의된 명령어가 아닌 경우
+        else if (content.startsWith("/")) {
+            // 정의된 명령어가 아니지만 '/'로 시작하는 경우, 일반 텍스트로 보냅니다.
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
+            messageInput.setText("");
         }
-        messageInput.setText("");
+        else {
+            // '/'로 시작하지 않는 일반 메시지
+            chatClient.sendMessage(chatRoom.getRoomId(), content, MessageType.TEXT, false);
+            messageInput.setText("");
+        }
     }
 
     private void attachFile() {
@@ -372,10 +370,11 @@ public class ChatRoomDialog extends JDialog {
             String contentToShow = message.getContent();
             String timestampAndSender;
 
-            if (message.getMessageType() == MessageType.COMMAND || message.getMessageType() == MessageType.SYSTEM) {
+            // COMMAND 타입 메시지의 경우에도 일반 메시지처럼 처리되도록 변경
+            if (message.getMessageType() == MessageType.SYSTEM) {
                 fontStyle = "italic";
-                textColor = (message.getMessageType() == MessageType.COMMAND) ? "blue" : "gray";
-                prefix = (message.getMessageType() == MessageType.COMMAND) ? "<span style='color: blue;'>[명령] </span>" : "<span style='color: gray;'>[시스템] </span>";
+                textColor = "gray";
+                prefix = "<span style='color: gray;'>[시스템] </span>";
                 outerDivAlign = "text-align: center;";
                 innerBubbleMargin = "margin-left: auto; margin-right: auto;";
                 timestampAndSender = message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm"));
@@ -389,7 +388,7 @@ public class ChatRoomDialog extends JDialog {
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();
-            } else {
+            } else { // TEXT 또는 COMMAND 메시지
                 timestampAndSender = (message.getSenderId() == currentUser.getUserId()) ?
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) :
                         message.getSentAt().format(DateTimeFormatter.ofPattern("HH:mm")) + " " + message.getSenderNickname();

@@ -590,6 +590,38 @@ public class ClientHandler implements Runnable {
                 }
 
                 int roomIdToLeave = (int) request.getData().get("roomId");
+
+                ChatRoom roomToLeave = chatRoomDAO.getChatRoomById(roomIdToLeave);
+                if (roomToLeave != null) {
+                    // ChatServer에서 systemUserId를 가져옵니다.
+                    int systemUserId = server.getSystemUserId();
+                    List<User> participants = chatRoomDAO.getParticipantsInRoom(roomIdToLeave);
+
+                    boolean isSystemRoom = false;
+                    if (!roomToLeave.isGroupChat() && participants.size() == 2) {
+                        // 1:1 채팅이고 참여자가 2명일 때, 그 중 한 명이 시스템 봇인지 확인
+                        boolean containsCurrentUser = false;
+                        boolean containsSystemUser = false;
+                        for (User p : participants) {
+                            if (p.getUserId() == this.userId) {
+                                containsCurrentUser = true;
+                            }
+                            if (p.getUserId() == systemUserId) {
+                                containsSystemUser = true;
+                            }
+                        }
+                        if (containsCurrentUser && containsSystemUser) {
+                            isSystemRoom = true;
+                        }
+                    }
+
+                    if (isSystemRoom) {
+                        response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "시스템 채팅방은 나갈 수 없습니다.", null);
+                        sendResponse(response);
+                        break;
+                    }
+                }
+
                 success = chatRoomDAO.leaveChatRoom(roomIdToLeave, this.userId);
                 if (success) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Left chat room successfully.", null);

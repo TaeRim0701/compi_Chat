@@ -322,8 +322,14 @@ public class ChatRoomDialog extends JDialog {
             });
             popupMenu.add(leaveRoomMenuItem);
 
+            if (!chatRoom.isGroupChat() && chatRoom.getRoomName().startsWith("시스템 메시지 for")) {
+                leaveRoomMenuItem.setEnabled(false); // 시스템 채팅방일 경우 비활성화
+                leaveRoomMenuItem.setText("채팅방 나가기 (시스템 채팅방)"); // 텍스트 변경
+            }
+
             popupMenu.show(menuButton, 0, menuButton.getHeight());
         });
+
         topPanel.add(menuButton, BorderLayout.EAST);
         mainPanel.add(topPanel, BorderLayout.NORTH);
 

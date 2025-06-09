@@ -394,27 +394,27 @@ public class ChatServer {
     }
 
     // 새로운 메서드: 만료된 공지를 정리하고, 관련 채팅방 클라이언트에게 공지 목록 업데이트를 요청
+    // 새로운 메서드: 만료된 공지를 정리하고, 관련 채팅방 클라이언트에게 공지 목록 업데이트를 요청
     private void clearExpiredNotices() {
         System.out.println("Checking and clearing expired notices...");
-        int clearedCount = messageDAO.clearExpiredNotices();
-        if (clearedCount > 0) {
-            System.out.println("Cleared " + clearedCount + " expired notices from DB. Notifying clients.");
-            // 모든 연결된 클라이언트에게 공지 목록을 새로고침하도록 요청
-            for (ClientHandler handler : connectedClients.values()) {
-                // handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Expired notices cleared, refresh notice list", null));
-                // 특정 채팅방의 공지 목록만 업데이트하도록 변경해야 함.
-                // 만료된 공지가 발생한 방들의 ID를 가져와서 해당 방의 참가자들에게만 업데이트를 요청하는 것이 효율적.
-                // 현재 clearExpiredNotices는 어떤 방의 공지가 만료되었는지 알 수 없으므로,
-                // 일단 모든 클라이언트에게 "공지 목록을 새로고침하라"는 일반적인 알림을 보냄.
-                // ChatClientGUI에서는 이 알림을 받으면, 열려있는 모든 채팅방의 공지 목록을 새로 가져와야 함.
+        Set<Integer> affectedRoomIds = messageDAO.clearExpiredNotices(); // 변경: affectedRoomIds를 받음
 
-                // 하지만 더 정확한 방법은, 만료된 공지의 room_id를 MessageDAO.clearExpiredNotices에서 반환하도록 하고,
-                // 그 room_id에 해당하는 방의 참가자들에게만 NOTICE_LIST_UPDATE를 보내는 것.
-                // 여기서는 모든 클라이언트에게 보냅니다.
-                // 이 방법은 효율적이지 않지만, 기능 구현을 위해 우선 사용합니다.
-                // ClientHandler에게 모든 채팅방의 공지 목록을 다시 요청하도록 유도
-                handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Expired notices cleared, refresh notice list", null));
-                // 또는 ChatClientGUI에서 열려있는 모든 ChatRoomDialog에 대해 getNoticeMessages(roomId)를 호출하도록 처리
+        if (!affectedRoomIds.isEmpty()) { // 변경: 영향을 받은 방이 있을 때만 알림 보냄
+            System.out.println("Cleared notices in rooms: " + affectedRoomIds + ". Notifying clients.");
+            // 영향을 받은 각 방에 대해 참가자들에게 공지 목록 업데이트 요청
+            for (int roomId : affectedRoomIds) {
+                // 해당 방의 모든 참가자 목록을 다시 가져와서 알림을 보냄
+                List<User> participantsInRoom = chatRoomDAO.getParticipantsInRoom(roomId);
+                for (User participant : participantsInRoom) {
+                    ClientHandler handler = connectedClients.get(participant.getUserId());
+                    if (handler != null) {
+                        // 특정 방 ID와 함께 공지 목록을 새로고침하라는 응답을 보냄
+                        // 클라이언트가 NOTICE_LIST_UPDATE를 받으면 해당 방의 공지만 새로고침하도록 유도
+                        Map<String, Object> data = new HashMap<>();
+                        data.put("roomId", roomId); // 어떤 방의 공지가 업데이트되었는지 클라이언트에게 알려줌
+                        handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Expired notices cleared in room " + roomId + ", please refresh notice list", data));
+                    }
+                }
             }
         }
     }

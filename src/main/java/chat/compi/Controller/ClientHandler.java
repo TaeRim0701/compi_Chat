@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class ClientHandler implements Runnable {
@@ -664,11 +665,30 @@ public class ClientHandler implements Runnable {
                 break;
 
             case CLEAR_EXPIRED_NOTICES: // 새로운 요청 타입 처리
-                int clearedCount = messageDAO.clearExpiredNotices();
-                System.out.println("Cleared " + clearedCount + " expired notices.");
-                response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, clearedCount + " expired notices cleared.", null);
-                sendResponse(response); // 요청한 클라이언트에게 응답
-                break;
+            // messageDAO.clearExpiredNotices()는 이제 Set<Integer>를 반환함
+            Set<Integer> affectedRoomIds = messageDAO.clearExpiredNotices(); // int clearedCount 대신 Set<Integer>로 받음
+            System.out.println("Cleared notices in rooms: " + affectedRoomIds);
+
+            // 만료된 공지가 정리된 각 방의 클라이언트에게 공지 목록 업데이트 알림을 보냄
+            // (ChatServer의 clearExpiredNotices 로직과 동일하게 동작하도록 복사)
+            if (!affectedRoomIds.isEmpty()) {
+                for (int roomId : affectedRoomIds) {
+                    List<User> participantsInRoom = chatRoomDAO.getParticipantsInRoom(roomId);
+                    for (User participant : participantsInRoom) {
+                        ClientHandler handler = server.getConnectedClients().get(participant.getUserId());
+                        if (handler != null) {
+                            Map<String, Object> data = new HashMap<>();
+                            data.put("roomId", roomId); // 어떤 방의 공지가 업데이트되었는지 클라이언트에게 알려줌
+                            handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.NOTICE_LIST_UPDATE, true, "Expired notices cleared in room " + roomId + ", please refresh notice list", data));
+                        }
+                    }
+                }
+            }
+
+            // 요청한 클라이언트에게는 단순히 성공 응답만 보냄 (clearedCount 정보는 필수는 아님)
+            response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "Expired notices scan complete.", null);
+            sendResponse(response);
+            break;
 
             default:
                 response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Unknown request type: " + request.getType(), null);

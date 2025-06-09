@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-// JEditorPane 관련 추가 임포트
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.BadLocationException;
@@ -33,7 +32,6 @@ public class ChatClientGUI extends JFrame {
     private ChatClient chatClient;
     private User currentUser;
 
-    // UI 컴포넌트 - 메인 화면용
     private DefaultListModel<User> friendListModel;
     private JList<User> friendList;
     private DefaultListModel<ChatRoom> chatRoomListModel;
@@ -43,16 +41,12 @@ public class ChatClientGUI extends JFrame {
     private JButton createChatRoomButton;
     private JToggleButton settingsToggleButton;
 
-    // 현재 활성화된 채팅방 (메인 GUI에서는 선택된 방 정보만 가짐)
     private ChatRoom currentChatRoom;
 
-    // 열려 있는 채팅방 다이얼로그를 관리하는 맵 (roomId -> ChatRoomDialog)
     private Map<Integer, ChatRoomDialog> openChatRoomDialogs;
 
-    // 친구 더블클릭으로 1:1 채팅방을 열 때, 어떤 친구와의 방을 열어야 하는지 임시로 저장
     private int pendingPrivateChatUserId = -1;
 
-    // 별도 창들
     private JFrame noticeFrame;
     private JEditorPane noticeArea;
     private HTMLEditorKit noticeEditorKit;
@@ -65,7 +59,6 @@ public class ChatClientGUI extends JFrame {
     private DefaultListModel<String> projectListModel;
     private List<TimelineEvent> allTimelineEvents;
 
-    // 공지사항 메시지 리스트를 저장하는 필드
     private List<Message> currentNoticeMessages;
 
     public JFrame getNoticeFrame() {
@@ -231,12 +224,10 @@ public class ChatClientGUI extends JFrame {
         add(mainPanel);
     }
 
-    // openChatRoomDialog 메서드 오버로드: 기본 호출 시 스크롤 메시지 ID 없음
     private void openChatRoomDialog(ChatRoom room) {
         openChatRoomDialog(room, -1);
     }
 
-    // openChatRoomDialog 메서드 시그니처 변경 (targetMessageId 인자 추가)
     private void openChatRoomDialog(ChatRoom room, int targetMessageId) {
         System.out.println("openChatRoomDialog called for room ID: " + room.getRoomId() + ", name: " + room.getRoomName() + ", targetMessageId: " + targetMessageId);
         ChatRoomDialog dialog = openChatRoomDialogs.get(room.getRoomId());
@@ -380,9 +371,8 @@ public class ChatClientGUI extends JFrame {
                 dialog.appendMessageToChatArea(newMessage);
             } else {
                 System.out.println("New message received for room " + messageRoomId + ", dialog not open. Content: " + newMessage.getContent());
-                chatClient.getChatRooms(); // 채팅방 목록 갱신 요청
+                chatClient.getChatRooms();
                 if (newMessage.getMessageType() == MessageType.SYSTEM) {
-                    // 시스템 메시지일 경우, 해당 시스템 채팅방을 찾아 열려고 시도
                     ChatRoom systemChatRoom = null;
                     for (int i = 0; i < chatRoomListModel.size(); i++) {
                         ChatRoom room = chatRoomListModel.getElementAt(i);
@@ -399,7 +389,7 @@ public class ChatClientGUI extends JFrame {
                 }
             }
             if (newMessage.getMessageType() != MessageType.SYSTEM) {
-                chatClient.getChatRooms(); // 비시스템 메시지일 경우에도 채팅방 목록 갱신
+                chatClient.getChatRooms();
             }
         });
     }
@@ -424,22 +414,44 @@ public class ChatClientGUI extends JFrame {
 
     private void handleNoticeListUpdate(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
-            // 서버 응답에 "Expired notices cleared, refresh notice list" 메시지가 오거나
-            // notices 데이터가 null이 아닌 경우 모두 처리.
-            // notices가 null일 수 있는 상황을 대비 (서버가 단순히 refresh 알림만 보낼 경우)
-            List<Message> notices = (List<Message>) response.getData().get("noticeMessages");
+            System.out.println("Received response: NOTICE_LIST_UPDATE"); // 로그 추가
 
-            // 모든 열려 있는 채팅방 다이얼로그의 공지 목록을 새로고침 요청
-            for (ChatRoomDialog dialog : openChatRoomDialogs.values()) {
-                // dialog.getChatRoomId() 대신 dialog.getChatRoom().getRoomId() 호출
-                chatClient.getNoticeMessages(dialog.getChatRoom().getRoomId()); // 수정된 부분
-            }
+            Integer updatedRoomId = (Integer) response.getData().get("roomId");
+            List<Message> notices = (List<Message>) response.getData().get("noticeMessages"); // 이 데이터는 서버가 getNoticeMessages 요청에 대한 응답으로만 보냄
 
-            // 공지 프레임이 열려 있다면 업데이트
+            // 1. 공지 프레임이 열려있다면 업데이트:
             if (noticeFrame.isVisible()) {
-                currentNoticeMessages = notices;
-                updateNoticeArea(notices);
+                // 서버가 이미 공지 메시지 목록을 직접 보내줬다면 그 데이터를 사용
+                if (notices != null) {
+                    currentNoticeMessages = notices; // 리스트 저장
+                    updateNoticeArea(notices);
+                } else {
+                    // notices가 null이라면 (서버가 단순히 만료 알림만 보낸 경우)
+                    // 현재 열려있는 공지 프레임이 어떤 방의 공지를 보여주는지 알 수 없으므로,
+                    // 열려있는 첫 번째 채팅방의 공지 목록을 다시 요청하여 업데이트를 유도
+                    if (updatedRoomId != null) { // 서버가 특정 방 ID를 알려준 경우
+                        chatClient.getNoticeMessages(updatedRoomId); // 이 요청에 대한 응답이 다시 handleNoticeListUpdate로 들어와 notices를 채울 것임
+                    } else if (!openChatRoomDialogs.isEmpty()) { // 특정 방 ID 없이 일반적인 알림이 왔을 때
+                        int firstRoomId = openChatRoomDialogs.keySet().iterator().next();
+                        chatClient.getNoticeMessages(firstRoomId); // 열려있는 첫 번째 방의 공지를 요청
+                    } else { // 열린 채팅방이 없는 경우 공지 프레임 비움
+                        currentNoticeMessages = new ArrayList<>();
+                        updateNoticeArea(new ArrayList<>());
+                    }
+                }
             }
+
+            // 2. 열려있는 채팅방 다이얼로그 업데이트:
+            // 만료된 공지든, 새로 설정된 공지든, 해당 채팅방 다이얼로그의 메시지 목록을 새로 로드해야 합니다.
+            // 이렇게 해야 메시지들의 공지 상태 (isNotice)가 화면에 정확히 반영됩니다.
+            if (updatedRoomId != null) {
+                ChatRoomDialog targetDialog = openChatRoomDialogs.get(updatedRoomId);
+                if (targetDialog != null) {
+                    targetDialog.loadMessages(); // 해당 방의 모든 메시지를 다시 로드하여 공지 상태 반영
+                }
+            }
+            // else: updatedRoomId가 null인 경우는 모든 열린 다이얼로그에 대해 명시적으로 loadMessages를 호출하지 않습니다.
+            //       이런 경우에는 사용자가 직접 채팅방을 열거나 새로운 메시지가 도착했을 때 업데이트됩니다.
         });
     }
 
@@ -473,7 +485,7 @@ public class ChatClientGUI extends JFrame {
                     JOptionPane.showMessageDialog(this, "파일이 성공적으로 다운로드되었습니다:\n" + fileToSave.getAbsolutePath(), "다운로드 성공", JOptionPane.INFORMATION_MESSAGE);
                 }
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "파일 다운로드 중 오류 발생: " + e.getMessage(), "다운로드 오류", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "파일 다운로드 중 오류 발생: " + e.getMessage(), " 다운로드 오류", JOptionPane.ERROR_MESSAGE);
             }
         });
     }
@@ -482,27 +494,26 @@ public class ChatClientGUI extends JFrame {
         SwingUtilities.invokeLater(() -> {
             Message notificationMessage = (Message) response.getData().get("message");
             Integer unreadRoomIdInteger = (Integer) response.getData().get("unreadRoomId");
-            int targetRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : notificationMessage.getRoomId();
+            int messageRoomId = (unreadRoomIdInteger != null) ? unreadRoomIdInteger.intValue() : notificationMessage.getRoomId();
 
             if (notificationMessage == null) {
                 System.err.println("Error: Received SYSTEM_NOTIFICATION with null message object.");
                 return;
             }
 
-            ChatRoomDialog dialog = openChatRoomDialogs.get(targetRoomId);
-
+            ChatRoomDialog dialog = openChatRoomDialogs.get(messageRoomId);
             if (dialog != null) {
-                System.out.println("Appending system message to existing dialog for room: " + targetRoomId);
+                System.out.println("Appending system message to existing dialog for room: " + messageRoomId);
                 dialog.appendMessageToChatArea(notificationMessage);
                 if (notificationMessage.getMessageId() != 0) {
                     chatClient.markMessageAsRead(notificationMessage.getMessageId());
                 }
             } else {
-                System.out.println("New system message received for room " + targetRoomId + ", dialog not open. Attempting to open.");
+                System.out.println("New system message received for room " + messageRoomId + ", dialog not open. Attempting to open.");
                 ChatRoom systemChatRoom = null;
                 for (int i = 0; i < chatRoomListModel.size(); i++) {
                     ChatRoom room = chatRoomListModel.getElementAt(i);
-                    if (room.getRoomId() == targetRoomId) {
+                    if (room.getRoomId() == messageRoomId) {
                         systemChatRoom = room;
                         break;
                     }
@@ -511,7 +522,7 @@ public class ChatClientGUI extends JFrame {
                 if (systemChatRoom != null) {
                     openChatRoomDialog(systemChatRoom);
                 } else {
-                    System.err.println("System chat room with ID " + targetRoomId + " not found in chatRoomListModel. Requesting chat rooms update.");
+                    System.err.println("System chat room with ID " + messageRoomId + " not found in chatRoomListModel. Requesting chat rooms update.");
                     chatClient.getChatRooms();
                 }
             }
@@ -529,12 +540,7 @@ public class ChatClientGUI extends JFrame {
             // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
         } else if (response.getMessage().equals("프로젝트가 종료되었습니다.")) {
             // Nothing specific to do here, as timeline update is handled by TIMELINE_UPDATE response
-        } else if (response.getMessage().contains("expired notices cleared")) { // 만료된 공지 정리 알림
-            // 서버로부터 만료된 공지가 정리되었다는 알림을 받으면,
-            // 열려있는 모든 채팅방의 공지 목록을 새로고침하도록 요청 (getNoticeMessages 호출)
-            // handleNoticeListUpdate에서 실제 GUI 업데이트를 처리함.
-            // 이미 handleNoticeListUpdate에서 전체 열려있는 다이얼로그에 대해 getNoticeMessages를 호출하고 있으므로
-            // 여기서는 특별히 추가적인 로직을 넣지 않아도 됨.
+        } else if (response.getMessage().contains("expired notices cleared")) {
             System.out.println(response.getMessage());
         }
     }
@@ -548,8 +554,8 @@ public class ChatClientGUI extends JFrame {
             String statusText = isNotice ? "공지로 설정되었습니다." : "공지에서 해제되었습니다.";
             JOptionPane.showMessageDialog(this, "메시지가 " + statusText, "알림", JOptionPane.INFORMATION_MESSAGE);
 
-            // 해당 채팅방의 공지 목록을 새로고침
-            chatClient.getNoticeMessages(roomId);
+            // 해당 채팅방의 공지 목록을 새로고침 요청
+            chatClient.getNoticeMessages(roomId); // 이 요청에 대한 응답이 handleNoticeListUpdate로 다시 올 것.
 
             // 채팅방 다이얼로그가 열려 있다면 메시지 상태를 새로고침 (공지 여부 표시 변경)
             ChatRoomDialog dialog = openChatRoomDialogs.get(roomId);
@@ -592,7 +598,6 @@ public class ChatClientGUI extends JFrame {
         JScrollPane scrollPane = new JScrollPane(noticeArea);
         noticeFrame.add(scrollPane);
 
-        // HyperlinkListener 추가
         noticeArea.addHyperlinkListener(e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
                 String description = e.getDescription();
@@ -618,7 +623,7 @@ public class ChatClientGUI extends JFrame {
                             noticeFrame.setVisible(false);
                         } else {
                             JOptionPane.showMessageDialog(noticeFrame, "해당 공지가 속한 채팅방을 찾을 수 없습니다.", "오류", JOptionPane.ERROR_MESSAGE);
-                            chatClient.getChatRooms(); // 채팅방 목록 갱신
+                            chatClient.getChatRooms();
                         }
 
                     } catch (NumberFormatException | ArrayIndexOutOfBoundsException ex) {
@@ -630,16 +635,15 @@ public class ChatClientGUI extends JFrame {
     }
 
     private void updateNoticeArea(List<Message> notices) {
-        currentNoticeMessages = notices; // 리스트 저장
+        currentNoticeMessages = notices;
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
         StringBuilder htmlContent = new StringBuilder("<html><body>");
 
-        if (notices == null || notices.isEmpty()) { // notices가 null일 경우도 처리
+        if (notices == null || notices.isEmpty()) {
             htmlContent.append("<p>공지사항이 없습니다.</p>");
         } else {
             for (Message notice : notices) {
                 String link = "notice://" + notice.getRoomId() + "/" + notice.getMessageId();
-                // 만료 시간 표시 추가
                 String expiryInfo = "";
                 if (notice.getNoticeExpiryTime() != null) {
                     expiryInfo = " (만료: " + notice.getNoticeExpiryTime().format(formatter) + ")";
@@ -649,13 +653,13 @@ public class ChatClientGUI extends JFrame {
                         "<p style='margin-bottom: 10px;'>" +
                                 "<a href='%s' style='text-decoration: none; color: black;'>" +
                                 "<span style='font-size: 0.9em; color: #888;'>[%s] %s: </span>" +
-                                "<span style='font-weight: bold;'>%s</span>%s" + // expiryInfo 추가
+                                "<span style='font-weight: bold;'>%s</span>%s" +
                                 "</a></p>",
                         link,
                         notice.getSentAt().format(formatter),
                         notice.getSenderNickname(),
                         notice.getContent(),
-                        expiryInfo // 최종 HTML에 추가
+                        expiryInfo
                 ));
             }
         }
@@ -768,8 +772,7 @@ public class ChatClientGUI extends JFrame {
                         event.getEventTime().format(formatter),
                         event.getDescription()
                 );
-            }
-            else {
+            } else {
                 displayContent = event.getEventTime().format(formatter) + " " + event.getSenderNickname() + " " + event.getCommand() + ": " + event.getDescription();
             }
             timelineArea.append(displayContent + "\n\n");
@@ -892,14 +895,7 @@ public class ChatClientGUI extends JFrame {
         cancelButton.addActionListener(e -> createRoomDialog.dispose());
 
         buttonPanel.add(createButton);
-        buttonPanel.add(cancelButton);
-
-        createRoomDialog.add(namePanel, BorderLayout.NORTH);
-        createRoomDialog.add(userScrollPane, BorderLayout.CENTER);
-        createRoomDialog.add(buttonPanel, BorderLayout.SOUTH);
-        createRoomDialog.setVisible(true);
     }
-
 
     public static class FriendListCellRenderer extends JLabel implements ListCellRenderer<User> {
         @Override

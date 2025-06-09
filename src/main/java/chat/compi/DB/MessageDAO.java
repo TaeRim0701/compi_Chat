@@ -9,7 +9,9 @@ import chat.compi.Entity.UserStatus;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class MessageDAO {
 
@@ -310,24 +312,43 @@ public class MessageDAO {
     }
 
     /**
-     * 만료된 공지 메시지의 is_notice 상태를 해제합니다.
+     * 만료된 공지 메시지의 is_notice 상태를 해제하고, 해당 공지가 속했던 방 ID 목록을 반환합니다.
      * 이 메서드는 주기적으로 호출되어야 합니다.
-     * @return 상태가 변경된 메시지 수
+     * @return 상태가 변경된 공지가 속했던 방 ID 리스트
      */
-    public int clearExpiredNotices() {
-        String sql = "UPDATE messages SET is_notice = FALSE, notice_expiry_time = NULL WHERE is_notice = TRUE AND notice_expiry_time IS NOT NULL AND notice_expiry_time <= NOW()";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            int affectedRows = pstmt.executeUpdate();
-            if (affectedRows > 0) {
-                System.out.println(affectedRows + " expired notices cleared.");
+    public Set<Integer> clearExpiredNotices() { // Set<Integer> 반환하도록 변경
+        Set<Integer> affectedRoomIds = new HashSet<>();
+        String selectSql = "SELECT DISTINCT room_id FROM messages WHERE is_notice = TRUE AND notice_expiry_time IS NOT NULL AND notice_expiry_time <= NOW()";
+        String updateSql = "UPDATE messages SET is_notice = FALSE, notice_expiry_time = NULL WHERE is_notice = TRUE AND notice_expiry_time IS NOT NULL AND notice_expiry_time <= NOW()";
+
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false); // 트랜잭션 시작
+
+            // 먼저 영향을 받는 room_id들을 조회
+            try (PreparedStatement selectPstmt = conn.prepareStatement(selectSql);
+                 ResultSet rs = selectPstmt.executeQuery()) {
+                while (rs.next()) {
+                    affectedRoomIds.add(rs.getInt("room_id"));
+                }
             }
-            return affectedRows;
+
+            // 공지 상태를 업데이트
+            try (PreparedStatement updatePstmt = conn.prepareStatement(updateSql)) {
+                int affectedRows = updatePstmt.executeUpdate();
+                if (affectedRows > 0) {
+                    System.out.println(affectedRows + " expired notices marked as non-notice.");
+                }
+            }
+
+            conn.commit(); // 모든 작업 성공 시 커밋
         } catch (SQLException e) {
             System.err.println("Error clearing expired notices: " + e.getMessage());
-            return 0;
+            e.printStackTrace();
+            // 롤백은 Connection 닫히면 자동으로 됨 (try-with-resources)
         }
+        return affectedRoomIds; // 영향을 받은 방 ID 목록 반환
     }
+
 
     /**
      * 특정 사용자가 아직 읽지 않은 시스템 메시지 조회

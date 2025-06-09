@@ -250,6 +250,21 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
+                if (messageContent.trim().equalsIgnoreCase("/h")) {
+                    String systemMessageContent = getTimelineHelpMessage(); // 아래에서 정의할 헬퍼 메서드
+                    server.sendMessageToUser(this.userId, new Message(
+                            -1, // roomId는 sendMessageToUser에서 시스템 채팅방으로 설정될 것임
+                            server.getSystemUserId(), // 시스템 봇 ID
+                            "시스템", // 발신자 닉네임
+                            MessageType.SYSTEM, // 메시지 타입
+                            systemMessageContent, // 내용
+                            false // 공지 아님
+                    ));
+                    // 사용자 채팅창에도 "명령어를 보냈습니다" 같은 피드백을 줄 수 있지만, 여기서는 시스템 메시지로 충분
+                    sendResponse(new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "타임라인 도움말이 시스템 채팅방으로 전송되었습니다.", null));
+                    break; // /h 명령어를 처리했으므로 일반 메시지 전송 로직은 건너뜀
+                }
+
                 Message newMessage = new Message(currentRoomId, this.userId, sender.getNickname(), messageType, messageContent, isNotice);
                 server.broadcastMessageToRoom(newMessage, this.userId);
                 break;
@@ -809,5 +824,14 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             System.err.println("Error closing client handler resources: " + e.getMessage());
         }
+    }
+
+    private String getTimelineHelpMessage() {
+        return "/s [프로젝트명]: 새로운 프로젝트를 시작하고 타임라인에 기록합니다.(start)<br>" +
+                "/c [프로젝트명]/[내용]: 특정 프로젝트에 대한 진행 내용이나 업데이트 사항을 추가합니다.(comment)<br>" +
+                "/d [프로젝트명]: 특정 프로젝트를 종료하고 타임라인에 PROJECT_END 이벤트를 기록합니다.(done)<br>" +
+                "/del [프로젝트명]: 특정 프로젝트와 관련된 모든 타임라인 이벤트(시작, 내용, 종료)를 영구적으로 삭제합니다.(delete)<br>" +
+                "/h: 타임라인 명령어 사용법 및 설명을 다시 표시합니다.<br><br>" + // 두 번 줄바꿈
+                "타임라인 팝업창(메뉴 -> 타임라인)에서 현재 진행 중인 프로젝트 목록을 확인하고, 각 이벤트 내용을 우클릭하여 수정하거나 삭제할 수 있습니다.";
     }
 }

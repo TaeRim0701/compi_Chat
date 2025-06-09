@@ -79,7 +79,28 @@ public class ChatServer {
         if (userId == systemUserId) {
             return null;
         }
-        return chatRoomDAO.getOrCreateSystemChatRoomForUser(userId, systemUserId);
+        ChatRoom systemChatRoom = chatRoomDAO.getOrCreateSystemChatRoomForUser(userId, systemUserId);
+
+        // 새로 추가된 부분: 시스템 채팅방 최초 생성 시 안내 메시지 전송
+        if (systemChatRoom != null) {
+            // 이 방에 메시지가 없는지 확인 (최초 생성 여부 판단)
+            List<Message> existingMessages = messageDAO.getMessagesInRoom(systemChatRoom.getRoomId());
+            if (existingMessages.isEmpty()) {
+                String systemMessageContent = getTimelineHelpMessage(); // 아래에서 정의할 헬퍼 메서드
+                Message systemIntroMessage = new Message(
+                        systemChatRoom.getRoomId(), // 시스템 채팅방 ID
+                        this.systemUserId, // 시스템 봇 ID
+                        "시스템", // 발신자 닉네임
+                        MessageType.SYSTEM, // 메시지 타입
+                        systemMessageContent, // 내용
+                        false // 공지 아님
+                );
+                // sendMessageToUser는 이미 메시지를 저장하고 전송하는 로직을 포함
+                sendMessageToUser(userId, systemIntroMessage);
+                System.out.println("Sent initial system help message to user " + userId + " in room " + systemChatRoom.getRoomId());
+            }
+        }
+        return systemChatRoom;
     }
 
     public void start() {
@@ -417,5 +438,14 @@ public class ChatServer {
                 }
             }
         }
+    }
+
+    private String getTimelineHelpMessage() {
+        return "/s [프로젝트명]: 새로운 프로젝트를 시작하고 타임라인에 기록합니다.(start)<br>" +
+                "/c [프로젝트명]/[내용]: 특정 프로젝트에 대한 진행 내용이나 업데이트 사항을 추가합니다.(comment)<br>" +
+                "/d [프로젝트명]: 특정 프로젝트를 종료하고 타임라인에 PROJECT_END 이벤트를 기록합니다.(done)<br>" +
+                "/del [프로젝트명]: 특정 프로젝트와 관련된 모든 타임라인 이벤트(시작, 내용, 종료)를 영구적으로 삭제합니다.(delete)<br>" +
+                "/h: 타임라인 명령어 사용법 및 설명을 다시 표시합니다.<br><br>" + // 두 번 줄바꿈
+                "타임라인 팝업창(메뉴 -> 타임라인)에서 현재 진행 중인 프로젝트 목록을 확인하고, 각 이벤트 내용을 우클릭하여 수정하거나 삭제할 수 있습니다.";
     }
 }

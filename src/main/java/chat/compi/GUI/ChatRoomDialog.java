@@ -476,7 +476,23 @@ public class ChatRoomDialog extends JDialog {
 
         if (messages != null) {
             for (Message message : messages) {
-                appendMessageToChatArea(message); // HTML에 messageId를 포함하여 메시지를 추가
+                appendMessageToChatArea(message);
+
+                // 현재 사용자가 보낸 메시지가 아니고,
+                // 이 메시지를 읽은 사용자 목록에 현재 사용자가 포함되어 있지 않다면 읽음 처리 요청
+                boolean alreadyReadByMe = false;
+                if (message.getReaders() != null) {
+                    for (User reader : message.getReaders()) {
+                        if (reader.getUserId() == currentUser.getUserId()) {
+                            alreadyReadByMe = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (message.getSenderId() != currentUser.getUserId() && !alreadyReadByMe) {
+                    chatClient.markMessageAsRead(message.getMessageId());
+                }
             }
         }
 

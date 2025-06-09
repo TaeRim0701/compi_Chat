@@ -636,56 +636,57 @@ public class ClientHandler implements Runnable {
                 break;
 
             case RESEND_NOTIFICATION:
-                int renotifyRoomId = (int) request.getData().get("roomId");
-                int renotifyMessageId = (int) request.getData().get("messageId");
+                int renotifyRoomId = (int) request.getData().get("roomId"); // 원본 메시지가 있는 채팅방 ID
+                int renotifyMessageId = (int) request.getData().get("messageId"); // 원본 메시지 ID
 
-                Message originalMessage = messageDAO.getMessageById(renotifyMessageId);
+                Message originalMessage = messageDAO.getMessageById(renotifyMessageId); // 원본 메시지 조회
                 if (originalMessage == null) {
                     response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "원본 메시지를 찾을 수 없습니다.", null);
                     sendResponse(response);
                     break;
                 }
 
-                User senderUser = userDAO.getUserByUserId(this.userId);
+                User senderUser = userDAO.getUserByUserId(this.userId); // 재알림을 요청한 사용자
                 if (senderUser != null) {
                     String senderConfirmContent = "재알림이 발송됐습니다: 원본 메시지 (\"" + originalMessage.getContent() + "\")";
                     Message senderConfirmationMessage = new Message(
-                            -1,
-                            server.getSystemUserId(),
-                            "시스템",
-                            MessageType.SYSTEM,
-                            senderConfirmContent,
-                            false
+                            -1, // roomId는 sendMessageToUser에서 시스템 채팅방으로 설정될 것임.
+                            server.getSystemUserId(), // 시스템 봇 ID
+                            "시스템", // 발신자 닉네임
+                            MessageType.SYSTEM, // 메시지 타입
+                            senderConfirmContent, // 내용
+                            false // 공지 아님
                     );
-                    server.sendMessageToUser(this.userId, senderConfirmationMessage);
+                    server.sendMessageToUser(this.userId, senderConfirmationMessage); // 재알림 요청자에게 확인 메시지 전송
                 }
 
+                // 원본 메시지가 있었던 방의 참여자 목록을 가져옵니다.
                 List<User> roomParticipants = chatRoomDAO.getParticipantsInRoom(renotifyRoomId);
 
                 for (User participant : roomParticipants) {
-                    if (participant.getUserId() == this.userId) {
+                    // 재알림 요청자이거나, 이미 메시지를 읽은 사용자에게는 알림을 보내지 않습니다.
+                    if (participant.getUserId() == this.userId || messageDAO.isMessageReadByUser(originalMessage.getMessageId(), participant.getUserId())) {
                         continue;
                     }
 
-                    boolean isRead = messageDAO.isMessageReadByUser(originalMessage.getMessageId(), participant.getUserId());
-                    if (!isRead) {
-                        String notificationContent = String.format(
-                                "채팅방 '%s'에서 '%s'님이 보낸 메시지를 아직 읽지 않으셨습니다: \"%s\"",
-                                chatRoomDAO.getChatRoomById(renotifyRoomId).getRoomName(),
-                                originalMessage.getSenderNickname(),
-                                originalMessage.getContent()
-                        );
+                    // 메시지를 아직 읽지 않은 사용자에게만 알림을 보냅니다.
+                    String notificationContent = String.format(
+                            "채팅방 '%s'에서 '%s'님이 보낸 메시지를 아직 읽지 않으셨습니다: \"%s\"", // 이 부분이 요청하신 메시지 형식입니다.
+                            chatRoomDAO.getChatRoomById(renotifyRoomId).getRoomName(), // 원본 메시지 방 이름
+                            originalMessage.getSenderNickname(), // 원본 메시지 발신자 닉네임
+                            originalMessage.getContent() // 원본 메시지 내용
+                    );
 
-                        Message systemNotificationToUnreadUser = new Message(
-                                -1,
-                                server.getSystemUserId(),
-                                "시스템",
-                                MessageType.SYSTEM,
-                                notificationContent,
-                                false
-                        );
-                        server.sendMessageToUser(participant.getUserId(), systemNotificationToUnreadUser);
-                    }
+                    Message systemNotificationToUnreadUser = new Message(
+                            -1, // roomId는 sendMessageToUser에서 시스템 채팅방으로 설정될 것임.
+                            server.getSystemUserId(), // 시스템 봇 ID
+                            "시스템", // 발신자 닉네임
+                            MessageType.SYSTEM, // 메시지 타입
+                            notificationContent, // 내용
+                            false // 공지 아님
+                    );
+                    // 이 메시지는 해당 사용자의 시스템 채팅방으로 전송됩니다.
+                    server.sendMessageToUser(participant.getUserId(), systemNotificationToUnreadUser);
                 }
                 response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "재알림 요청 처리 완료", null);
                 sendResponse(response);

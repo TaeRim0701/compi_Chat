@@ -398,6 +398,18 @@ public class ChatServer {
     }
 
     public void sendMessageToUser(int targetUserId, Message message) {
+        // 시스템 메시지의 경우, 해당 사용자의 시스템 채팅방 ID를 가져와서 설정
+        // 이전에 -1로 하드코딩했던 부분을 수정
+        if (message.getMessageType() == MessageType.SYSTEM) {
+            ChatRoom systemChatRoom = ensureUserSystemChatRoom(targetUserId); // 타겟 유저의 시스템 채팅방을 가져옵니다.
+            if (systemChatRoom != null) {
+                message.setRoomId(systemChatRoom.getRoomId()); // 메시지의 room_id를 시스템 채팅방 ID로 설정합니다.
+            } else {
+                System.err.println("CRITICAL ERROR: Could not get or create system chat room for user " + targetUserId + ". System message will not be saved.");
+                return; // 시스템 채팅방을 얻지 못하면 메시지 저장을 중단합니다.
+            }
+        }
+
         // 메시지 저장 로직은 무조건 수행
         Message savedMessage = messageDAO.saveMessage(message);
         if (savedMessage == null) {
@@ -416,6 +428,7 @@ public class ChatServer {
             Map<String, Object> data = new HashMap<>();
             data.put("message", savedMessage);
             data.put("senderId", savedMessage.getSenderId());
+            // 이 부분은 이미 savedMessage.getRoomId()를 사용하고 있으므로 별도 수정 필요 없음
             data.put("unreadRoomId", savedMessage.getRoomId()); // 시스템 메시지임을 알림 (클라이언트 측에서 시스템 채팅방 로드에 활용)
             handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.SYSTEM_NOTIFICATION, true, "System Notification", data));
             System.out.println("Sent system notification (real-time) to user " + targetUserId + " for room " + savedMessage.getRoomId());

@@ -25,6 +25,8 @@ import java.awt.event.MouseEvent;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.Element;
+import javax.swing.text.AttributeSet;
 import javax.swing.event.HyperlinkEvent;
 
 @SuppressWarnings("unchecked")
@@ -53,7 +55,9 @@ public class ChatClientGUI extends JFrame {
     private HTMLDocument noticeDoc;
 
     private JFrame timelineFrame;
-    private JTextArea timelineArea;
+    private JEditorPane timelineArea; // JTextArea -> JEditorPane 변경
+    private HTMLEditorKit timelineEditorKit; // 새로 추가
+    private HTMLDocument timelineDoc; // 새로 추가
 
     private JList<String> projectList;
     private DefaultListModel<String> projectListModel;
@@ -113,6 +117,19 @@ public class ChatClientGUI extends JFrame {
         System.out.println("DEBUG: Message " + response.getData().get("messageId") + " was already read. No action needed.");
     }
 
+    private void handleTimelineEventUpdatedSuccess(ServerResponse response) {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this, response.getMessage(), "수정 성공", JOptionPane.INFORMATION_MESSAGE);
+            // 타임라인 업데이트는 TIMELINE_UPDATE 응답으로 자동 처리됨
+        });
+    }
+
+    private void handleTimelineEventUpdatedFail(ServerResponse response) {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this, "타임라인 이벤트 수정 실패: " + response.getMessage(), "수정 실패", JOptionPane.ERROR_MESSAGE);
+        });
+    }
+
     private void setupResponseListeners() {
         chatClient.setResponseListener(ServerResponse.ResponseType.FRIEND_LIST_UPDATE, this::handleFriendListUpdate);
         chatClient.setResponseListener(ServerResponse.ResponseType.FRIEND_STATUS_UPDATE, this::handleFriendStatusUpdate);
@@ -131,6 +148,8 @@ public class ChatClientGUI extends JFrame {
         chatClient.setResponseListener(ServerResponse.ResponseType.MESSAGE_ALREADY_READ, this::handleMessageAlreadyRead);
         chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, this::handleTimelineEventDeletedSuccess);
         chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, this::handleTimelineEventDeleteFail);
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_UPDATED_SUCCESS, this::handleTimelineEventUpdatedSuccess); // 새로 추가
+        chatClient.setResponseListener(ServerResponse.ResponseType.TIMELINE_EVENT_UPDATED_FAIL, this::handleTimelineEventUpdatedFail); // 새로 추가
     }
 
     private void initComponents() {
@@ -567,11 +586,20 @@ public class ChatClientGUI extends JFrame {
 
     private void handleTimelineEventDeletedSuccess(ServerResponse response) {
         SwingUtilities.invokeLater(() -> {
-            String projectName = (String) response.getData().get("projectName");
-            int deletedCount = (int) response.getData().get("deletedCount");
-            int roomId = (int) response.getData().get("roomId");
+            // 프로젝트 단위 삭제와 단일 이벤트 삭제 모두 이 핸들러를 사용
+            String projectName = (String) response.getData().get("projectName"); // 프로젝트 단위 삭제 시
+            Integer eventId = (Integer) response.getData().get("eventId"); // 단일 이벤트 삭제 시
 
-            JOptionPane.showMessageDialog(this, "'" + projectName + "' 프로젝트의 타임라인 이벤트 " + deletedCount + "개가 삭제되었습니다.", "삭제 성공", JOptionPane.INFORMATION_MESSAGE);
+            String message;
+            if (projectName != null) {
+                int deletedCount = (int) response.getData().get("deletedCount");
+                message = "'" + projectName + "' 프로젝트의 타임라인 이벤트 " + deletedCount + "개가 삭제되었습니다.";
+            } else if (eventId != null) {
+                message = "타임라인 이벤트 ID " + eventId + "가 성공적으로 삭제되었습니다.";
+            } else {
+                message = "타임라인 이벤트 삭제 성공 (상세 정보 없음).";
+            }
+            JOptionPane.showMessageDialog(this, message, "삭제 성공", JOptionPane.INFORMATION_MESSAGE);
         });
     }
 
@@ -702,13 +730,75 @@ public class ChatClientGUI extends JFrame {
 
         JPanel contentPanel = new JPanel(new BorderLayout());
         contentPanel.setBorder(new TitledBorder("이벤트 내용"));
-        timelineArea = new JTextArea();
+        timelineArea = new JEditorPane(); // JTextArea -> JEditorPane 변경
+        timelineEditorKit = new HTMLEditorKit(); // 새로 추가
+        timelineArea.setEditorKit(timelineEditorKit); // 새로 추가
+        timelineDoc = (HTMLDocument) timelineArea.getDocument(); // 새로 추가
         timelineArea.setEditable(false);
-        timelineArea.setLineWrap(true);
-        timelineArea.setWrapStyleWord(true);
         JScrollPane scrollPane = new JScrollPane(timelineArea);
         contentPanel.add(scrollPane, BorderLayout.CENTER);
         mainTimelinePanel.add(contentPanel, BorderLayout.CENTER);
+
+        // JEditorPane에 마우스 리스너 추가
+        timelineArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    int pos = timelineArea.viewToModel(e.getPoint());
+                    HTMLDocument doc = (HTMLDocument) timelineArea.getDocument();
+                    Element element = doc.getCharacterElement(pos);
+
+                    Integer eventId = null;
+
+                    // data-event-id 속성을 가진 부모 Element 찾기
+                    Element currentElement = element;
+                    while (currentElement != null && eventId == null) {
+                        AttributeSet attrs = currentElement.getAttributes();
+                        String eventIdStr = (String) attrs.getAttribute("data-event-id");
+                        if (eventIdStr != null) {
+                            try {
+                                eventId = Integer.parseInt(eventIdStr);
+                            } catch (NumberFormatException ex) {
+                                System.err.println("Invalid event ID in HTML: " + eventIdStr);
+                            }
+                        }
+                        currentElement = currentElement.getParentElement();
+                    }
+
+                    if (eventId != null) {
+                        final int finalEventId = eventId;
+                        // 클릭된 이벤트 내용을 가져오기 위해 allTimelineEvents에서 찾음
+                        TimelineEvent clickedEvent = allTimelineEvents.stream()
+                                .filter(ev -> ev.getEventId() == finalEventId)
+                                .findFirst()
+                                .orElse(null);
+
+                        if (clickedEvent != null) {
+                            JPopupMenu popupMenu = new JPopupMenu();
+
+                            JMenuItem editItem = new JMenuItem("수정");
+                            editItem.addActionListener(ev -> {
+                                showEditTimelineEventDialog(clickedEvent);
+                            });
+                            popupMenu.add(editItem);
+
+                            JMenuItem deleteItem = new JMenuItem("삭제");
+                            deleteItem.addActionListener(ev -> {
+                                int confirm = JOptionPane.showConfirmDialog(timelineFrame,
+                                        "정말로 이 타임라인 이벤트를 삭제하시겠습니까?\n" + clickedEvent.getDescription(),
+                                        "이벤트 삭제 확인", JOptionPane.YES_NO_OPTION);
+                                if (confirm == JOptionPane.YES_OPTION) {
+                                    chatClient.deleteTimelineEventById(finalEventId);
+                                }
+                            });
+                            popupMenu.add(deleteItem);
+
+                            popupMenu.show(e.getComponent(), e.getX(), e.getY());
+                        }
+                    }
+                }
+            }
+        });
 
         timelineFrame.add(mainTimelinePanel);
     }
@@ -730,14 +820,14 @@ public class ChatClientGUI extends JFrame {
                 projectListModel.addElement(projectName);
             }
             projectList.setSelectedIndex(0);
-            filterTimelineEvents();
+            filterTimelineEvents(); // HTML 렌더링은 여기서
         });
     }
 
     private void filterTimelineEvents() {
         String selectedProject = projectList.getSelectedValue();
-        timelineArea.setText("");
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        StringBuilder htmlContent = new StringBuilder("<html><body>"); // HTML 시작
 
         List<TimelineEvent> filteredEvents = new ArrayList<>();
         if ("모든 이벤트".equals(selectedProject)) {
@@ -752,32 +842,95 @@ public class ChatClientGUI extends JFrame {
 
         filteredEvents.sort(Comparator.comparing(TimelineEvent::getEventTime));
 
-        for (TimelineEvent event : filteredEvents) {
-            String displayContent;
-            if ("PROJECT_START".equals(event.getEventType())) {
-                displayContent = String.format(
-                        "(%s) %s",
+        if (filteredEvents.isEmpty()) {
+            htmlContent.append("<p style='text-align: center; color: gray;'>타임라인 이벤트가 없습니다.</p>");
+        } else {
+            for (TimelineEvent event : filteredEvents) {
+                String displayContent;
+                String textColor = "black";
+                String fontWeight = "normal";
+
+                // 이벤트 타입에 따른 스타일 및 내용 구성
+                if ("PROJECT_START".equals(event.getEventType())) {
+                    displayContent = String.format("%s 시작 / %s", event.getEventName(), event.getSenderNickname());
+                    textColor = "#0056b3"; // 파란색
+                    fontWeight = "bold";
+                } else if ("PROJECT_CONTENT".equals(event.getEventType())) {
+                    displayContent = String.format("%s / %s", event.getDescription(), event.getSenderNickname());
+                    textColor = "#333333"; // 진한 회색
+                } else if ("PROJECT_END".equals(event.getEventType())) {
+                    displayContent = String.format("%s 종료 / %s", event.getEventName(), event.getSenderNickname());
+                    textColor = "#d9534f"; // 빨간색
+                    fontWeight = "bold";
+                } else { // 기타 (예: MESSAGE)
+                    displayContent = event.getDescription(); // 원본 description 사용
+                }
+
+                // HTML 형식으로 메시지 추가 (data-event-id 속성 추가)
+                htmlContent.append(String.format(
+                        "<div data-event-id='%d' style='margin-bottom: 10px; padding: 5px; border: 1px solid #ddd; border-radius: 5px;'>" +
+                                "<p style='margin: 0; font-size: 0.9em; color: #888;'>[%s]</p>" +
+                                "<p style='margin: 0; font-weight: %s; color: %s;'>%s</p>" +
+                                "</div>",
+                        event.getEventId(), // 여기에서 eventId를 data 속성으로 추가
                         event.getEventTime().format(formatter),
-                        event.getDescription()
-                );
-            } else if ("PROJECT_CONTENT".equals(event.getEventType())) {
-                displayContent = String.format(
-                        "(%s) %s",
-                        event.getEventTime().format(formatter),
-                        event.getDescription()
-                );
-            } else if ("PROJECT_END".equals(event.getEventType())) {
-                displayContent = String.format(
-                        "(%s) %s",
-                        event.getEventTime().format(formatter),
-                        event.getDescription()
-                );
-            } else {
-                displayContent = event.getEventTime().format(formatter) + " " + event.getSenderNickname() + " " + event.getCommand() + ": " + event.getDescription();
+                        fontWeight, textColor,
+                        displayContent
+                ));
             }
-            timelineArea.append(displayContent + "\n\n");
         }
-        timelineArea.setCaretPosition(0);
+        htmlContent.append("</body></html>");
+
+        SwingUtilities.invokeLater(() -> {
+            try {
+                timelineDoc.remove(0, timelineDoc.getLength());
+                timelineEditorKit.insertHTML(timelineDoc, timelineDoc.getLength(), htmlContent.toString(), 0, 0, null);
+                timelineArea.setCaretPosition(0);
+            } catch (BadLocationException | IOException e) {
+                System.err.println("Error updating timeline area: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private void showEditTimelineEventDialog(TimelineEvent eventToEdit) {
+        JDialog editDialog = new JDialog(timelineFrame, "타임라인 이벤트 수정", true);
+        editDialog.setSize(400, 200);
+        editDialog.setLocationRelativeTo(timelineFrame);
+        editDialog.setLayout(new BorderLayout(10, 10));
+
+        JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
+        inputPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        JTextArea descriptionArea = new JTextArea(eventToEdit.getDescription());
+        descriptionArea.setLineWrap(true);
+        descriptionArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(descriptionArea);
+        inputPanel.add(new JLabel("새로운 내용:"), BorderLayout.NORTH);
+        inputPanel.add(scrollPane, BorderLayout.CENTER);
+        editDialog.add(inputPanel, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton saveButton = new JButton("저장");
+        JButton cancelButton = new JButton("취소");
+
+        saveButton.addActionListener(e -> {
+            String newDescription = descriptionArea.getText().trim();
+            if (newDescription.isEmpty()) {
+                JOptionPane.showMessageDialog(editDialog, "내용을 입력해주세요.", "입력 오류", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            chatClient.updateTimelineEvent(eventToEdit.getEventId(), newDescription);
+            editDialog.dispose();
+        });
+
+        cancelButton.addActionListener(e -> editDialog.dispose());
+
+        buttonPanel.add(saveButton);
+        buttonPanel.add(cancelButton);
+        editDialog.add(buttonPanel, BorderLayout.SOUTH);
+
+        editDialog.setVisible(true);
     }
 
     private void toggleSettingsPanel() {

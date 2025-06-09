@@ -277,4 +277,17 @@ public class ChatClient {
         data.put("expiryTime", expiryTime); // 만료 시간 추가
         sendRequest(new ClientRequest(ClientRequest.RequestType.MARK_AS_NOTICE, data));
     }
+
+    public void updateTimelineEvent(int eventId, String newDescription) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("eventId", eventId);
+        data.put("newDescription", newDescription);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.UPDATE_TIMELINE_EVENT, data));
+    }
+
+    public void deleteTimelineEventById(int eventId) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("eventId", eventId);
+        sendRequest(new ClientRequest(ClientRequest.RequestType.DELETE_SINGLE_TIMELINE_EVENT, data));
+    }
 }

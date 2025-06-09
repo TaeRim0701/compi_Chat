@@ -690,6 +690,61 @@ public class ClientHandler implements Runnable {
             sendResponse(response);
             break;
 
+            case UPDATE_TIMELINE_EVENT:
+                int eventIdToUpdate = (int) request.getData().get("eventId");
+                String newDescription = (String) request.getData().get("newDescription");
+                if (timelineDAO.updateTimelineEventDescription(eventIdToUpdate, newDescription)) {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_UPDATED_SUCCESS, true, "타임라인 이벤트가 성공적으로 수정되었습니다.", null);
+                    // 변경된 이벤트가 속한 방의 타임라인 업데이트 알림
+                    TimelineEvent updatedEvent = timelineDAO.getTimelineEventsInRoom(-1).stream() // 모든 이벤트를 가져오는 것은 비효율적, ID로 단일 이벤트 가져오는 메서드 필요
+                            .filter(e -> e.getEventId() == eventIdToUpdate)
+                            .findFirst().orElse(null);
+                    if (updatedEvent != null) {
+                        List<TimelineEvent> updatedTimelineEvents = timelineDAO.getTimelineEventsInRoom(updatedEvent.getRoomId());
+                        Map<String, Object> timelineData = new HashMap<>();
+                        timelineData.put("roomId", updatedEvent.getRoomId());
+                        timelineData.put("timelineEvents", updatedTimelineEvents);
+                        // 해당 방의 모든 참가자에게 타임라인 업데이트 알림
+                        List<User> participants = chatRoomDAO.getParticipantsInRoom(updatedEvent.getRoomId());
+                        for (User participant : participants) {
+                            ClientHandler handler = server.getConnectedClients().get(participant.getUserId());
+                            if (handler != null) {
+                                handler.sendResponse(new ServerResponse(ServerResponse.ResponseType.TIMELINE_UPDATE, true, "Timeline updated after event modification", timelineData));
+                            }
+                        }
+                    }
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_UPDATED_FAIL, false, "타임라인 이벤트 수정에 실패했습니다.", null);
+                }
+                sendResponse(response);
+                break;
+
+            case DELETE_SINGLE_TIMELINE_EVENT:
+                int eventIdToDelete = (int) request.getData().get("eventId");
+                TimelineEvent eventToDelete = timelineDAO.getTimelineEventById(eventIdToDelete); // getTimelineEventById 사용
+
+                if (eventToDelete == null) {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, false, "삭제할 타임라인 이벤트를 찾을 수 없습니다.", null);
+                    sendResponse(response);
+                    break;
+                }
+
+                // 변수 이름을 변경합니다.
+                int deletedSingleEventRows = timelineDAO.deleteTimelineEventById(eventIdToDelete); // 변경된 부분
+                if (deletedSingleEventRows > 0) { // 변경된 부분
+                    responseData.put("roomId", eventToDelete.getRoomId());
+                    responseData.put("eventId", eventIdToDelete);
+                    responseData.put("deletedCount", deletedSingleEventRows); // 변경된 부분
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETED_SUCCESS, true, "타임라인 이벤트가 성공적으로 삭제되었습니다.", responseData);
+
+                    // ... (나머지 코드 동일)
+                } else {
+                    response = new ServerResponse(ServerResponse.ResponseType.TIMELINE_EVENT_DELETE_FAIL, false, "타임라인 이벤트 삭제에 실패했습니다.", null);
+                }
+                sendResponse(response);
+                break;
+
+
             default:
                 response = new ServerResponse(ServerResponse.ResponseType.FAIL, false, "Unknown request type: " + request.getType(), null);
                 sendResponse(response);

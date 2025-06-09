@@ -20,7 +20,9 @@ public class ClientRequest implements Serializable {
         ADD_TIMELINE_EVENT, DELETE_TIMELINE_EVENT,
         ADD_PROJECT_CONTENT_TO_TIMELINE,
         END_PROJECT_TO_TIMELINE,
-        CLEAR_EXPIRED_NOTICES
+        CLEAR_EXPIRED_NOTICES,
+        UPDATE_TIMELINE_EVENT,
+        DELETE_SINGLE_TIMELINE_EVENT
     }
 
     private RequestType type;

@@ -109,4 +109,70 @@ public class TimelineDAO {
         }
         return false;
     }
+
+    /**
+     * 특정 타임라인 이벤트의 설명을 수정합니다.
+     * @param eventId 수정할 이벤트의 ID
+     * @param newDescription 새로운 설명 내용
+     * @return 수정 성공 여부
+     */
+    public boolean updateTimelineEventDescription(int eventId, String newDescription) {
+        String sql = "UPDATE timeline_events SET description = ? WHERE event_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, newDescription);
+            pstmt.setInt(2, eventId);
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("Error updating timeline event description for event ID " + eventId + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 특정 타임라인 이벤트를 ID로 삭제합니다.
+     * @param eventId 삭제할 이벤트의 ID
+     * @return 삭제된 행의 수
+     */
+    public int deleteTimelineEventById(int eventId) {
+        String sql = "DELETE FROM timeline_events WHERE event_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, eventId);
+            return pstmt.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("Error deleting timeline event by ID " + eventId + ": " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 특정 이벤트 ID로 타임라인 이벤트를 조회합니다.
+     * @param eventId 조회할 이벤트의 ID
+     * @return TimelineEvent 객체 또는 null
+     */
+    public TimelineEvent getTimelineEventById(int eventId) {
+        String sql = "SELECT te.event_id, te.room_id, te.user_id, u.nickname, te.command, te.description, te.event_time, te.event_type, te.event_name " +
+                "FROM timeline_events te JOIN users u ON te.user_id = u.user_id " +
+                "WHERE te.event_id = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, eventId);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                int rId = rs.getInt("room_id");
+                int uId = rs.getInt("user_id");
+                String nickname = rs.getString("nickname");
+                String command = rs.getString("command");
+                String description = rs.getString("description");
+                LocalDateTime eventTime = rs.getTimestamp("event_time").toLocalDateTime();
+                String eventType = rs.getString("event_type");
+                String eventName = rs.getString("event_name");
+                return new TimelineEvent(eventId, rId, uId, nickname, command, description, eventTime, eventType, eventName);
+            }
+        } catch (SQLException e) {
+            System.err.println("Error getting timeline event by ID: " + e.getMessage());
+        }
+        return null;
+    }
 }

@@ -1013,6 +1013,9 @@ public class ChatClientGUI extends JFrame {
         JScrollPane userScrollPane = new JScrollPane(allUsersList);
         userScrollPane.setBorder(new TitledBorder("초대할 친구 선택 (Ctrl/Shift/Shift 클릭)"));
 
+        createRoomDialog.add(namePanel, BorderLayout.NORTH); // 채팅방 이름 필드 추가
+        createRoomDialog.add(userScrollPane, BorderLayout.CENTER); // 친구 목록 스크롤 패널 추가
+
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton createButton = new JButton("생성");
         JButton cancelButton = new JButton("취소");
@@ -1030,10 +1033,10 @@ public class ChatClientGUI extends JFrame {
             if (selectedUsers.isEmpty()) {
                 JOptionPane.showMessageDialog(createRoomDialog, "채팅방에 초대할 친구를 선택해주세요.", "입력 오류", JOptionPane.WARNING_MESSAGE);
                 return;
-            } else if (selectedUsers.size() == 1) {
+            } else if (selectedUsers.size() == 1) { // 1:1 채팅
                 isGroupChat = false;
-                finalRoomName = "";
-            } else {
+                finalRoomName = ""; // 1:1 채팅은 서버에서 이름을 자동 생성하도록 비워둠
+            } else { // 그룹 채팅 (2명 이상)
                 if (finalRoomName.isEmpty()) {
                     JOptionPane.showMessageDialog(createRoomDialog, "그룹 채팅방 이름을 입력해주세요.", "입력 오류", JOptionPane.WARNING_MESSAGE);
                     return;
@@ -1048,6 +1051,10 @@ public class ChatClientGUI extends JFrame {
         cancelButton.addActionListener(e -> createRoomDialog.dispose());
 
         buttonPanel.add(createButton);
+        buttonPanel.add(cancelButton); // 취소 버튼도 다시 추가
+        createRoomDialog.add(buttonPanel, BorderLayout.SOUTH); // **여기를 createRoomDialog에 추가하도록 수정**
+
+        createRoomDialog.setVisible(true); // 다이얼로그가 보이도록 설정
     }
 
     public static class FriendListCellRenderer extends JLabel implements ListCellRenderer<User> {

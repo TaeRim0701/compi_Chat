@@ -368,7 +368,7 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                String contentDescription = String.format("%s / %s", contentMessage, contentSender.getNickname());
+                String contentDescription = String.format("%s", contentMessage);
 
                 if (timelineDAO.saveTimelineEvent(contentRoomId, this.userId, "/c", contentDescription, "PROJECT_CONTENT", contentProjectName)) {
                     response = new ServerResponse(ServerResponse.ResponseType.SUCCESS, true, "프로젝트 타임라인에 내용이 추가되었습니다.", null);
